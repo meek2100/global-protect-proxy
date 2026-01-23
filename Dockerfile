@@ -16,14 +16,20 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends
 
 # 2. Download and Install the Official Release (v2.5.1)
-# This bypasses the compilation errors entirely.
 WORKDIR /tmp
 RUN curl -LO https://github.com/yuezk/GlobalProtect-openconnect/releases/download/v2.5.1/globalprotect-openconnect_2.5.1-1_amd64.deb && \
     apt-get install -y ./globalprotect-openconnect_2.5.1-1_amd64.deb && \
     rm globalprotect-openconnect_2.5.1-1_amd64.deb && \
     rm -rf /var/lib/apt/lists/*
 
-# 3. Setup Environment
+# 3. THE FIX: Neuter the GUI binary
+# The official app tries to launch 'gpgui' and crashes if running as root.
+# We replace it with a dummy script that sleeps forever so gpservice thinks it's running.
+RUN rm /usr/bin/gpgui && \
+    echo '#!/bin/bash\nwhile true; do sleep 3600; done' > /usr/bin/gpgui && \
+    chmod +x /usr/bin/gpgui
+
+# 4. Setup Environment
 RUN mkdir -p /var/www/html
 
 COPY start.sh /start.sh
