@@ -1,0 +1,14 @@
+services:
+  vpn-proxy:
+    build: .
+    image: ghcr.io/meek2100/global-protect-proxy:latest
+    container_name: globalprotect-vpn
+    cap_add:
+      - NET_ADMIN # Required for creating the VPN network interface (tun0)
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "1080:1080" # Maps the SOCKS proxy to your host
+    environment:
+      - VPN_PORTAL=lehvpn.snapone.com
+    restart: unless-stopped
