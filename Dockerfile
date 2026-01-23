@@ -1,70 +1,37 @@
-# Stage 1: Build from Source
-FROM rust:1.85-bookworm AS builder
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-# 1. Install extended build dependencies
-# 'gettext', 'autopoint', 'bison', 'flex' are CRITICAL for building openconnect from git.
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    git \
-    libssl-dev \
-    libgtk-3-dev \
-    libwebkit2gtk-4.1-dev \
-    libappindicator3-dev \
-    automake \
-    autoconf \
-    libtool \
-    pkg-config \
-    libxml2-dev \
-    patch \
-    gettext \
-    autopoint \
-    bison \
-    flex \
-    --no-install-recommends
-
-WORKDIR /usr/src/app
-
-# 2. Clone the Stable Release (v2.5.1)
-RUN git clone --branch v2.5.1 --depth 1 https://github.com/yuezk/GlobalProtect-openconnect.git .
-
-# 3. Initialize Submodules
-RUN git submodule update --init --recursive
-
-# 4. Build
-# We limit concurrency to prevent OOM kills on smaller runners
-ENV CARGO_BUILD_JOBS=2
-RUN make build BUILD_GUI=0 BUILD_FE=0
-
-# --- Stage 2: Runtime ---
+# Use Debian Bookworm (Stable) to ensure compatibility with the .deb package
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install runtime dependencies
+# 1. Install Runtime Dependencies & Tools
+# We install 'curl' to download the .deb
+# We install 'libgtk-3-0' and 'libwebkit2gtk-4.0-37' because the pre-built binary
+# links against them. apt will verify and pull these in automatically.
 RUN apt-get update && apt-get install -y \
-    libopenconnect5 \
+    curl \
     ca-certificates \
     microsocks \
-    curl \
     iproute2 \
     iptables \
-    libgtk-3-0 \
     python3 \
-    --no-install-recommends && \
+    --no-install-recommends
+
+# 2. Download and Install the Official .deb Release (v2.5.1)
+# apt-get install ./file.deb will automatically resolve all the missing GUI dependencies
+WORKDIR /tmp
+RUN curl -LO https://github.com/yuezk/GlobalProtect-openconnect/releases/download/v2.5.1/globalprotect-openconnect_2.5.1-1_amd64.deb && \
+    apt-get install -y ./globalprotect-openconnect_2.5.1-1_amd64.deb && \
+    rm globalprotect-openconnect_2.5.1-1_amd64.deb && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy binaries
-COPY --from=builder /usr/src/app/target/release/gpclient /usr/local/bin/
-COPY --from=builder /usr/src/app/target/release/gpservice /usr/local/bin/
-COPY --from=builder /usr/src/app/target/release/gpauth /usr/local/bin/
+# 3. Setup Environment
+# The official package installs binaries to /usr/bin/gpclient, etc.
+RUN mkdir -p /var/www/html
 
-# Setup Environment
-RUN mkdir -p /etc/gpservice /var/www/html
+# Copy your existing startup script
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
 EXPOSE 1080 8000
+
 ENTRYPOINT ["/start.sh"]
