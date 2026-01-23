@@ -1,11 +1,11 @@
 # Stage 1: Build the headless client and service
 FROM rust:1.85-bookworm AS builder
 
-# Prevent interactive prompts during package installation
+# Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install build dependencies
-# Added: libgtk-3-dev (Required by gpapi/gpclient even in headless mode)
+# libgtk-3-dev is REQUIRED for linking gpclient/gpauth, even if we disable the GUI.
 RUN apt-get update && apt-get install -y \
     libopenconnect-dev \
     build-essential \
@@ -18,16 +18,16 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /usr/src/app
 
-# Clone repo
-RUN git clone https://github.com/yuezk/GlobalProtect-openconnect.git .
+# Clone the specific STABLE release tag (v2.5.1)
+# Using 'master' causes patch failures as upstream changes break the build.
+RUN git clone --branch v2.5.1 --depth 1 https://github.com/yuezk/GlobalProtect-openconnect.git .
 
 # ---------------------------------------------------------------------
 # BUILD STEPS
 # ---------------------------------------------------------------------
 
 # 1. Build gpclient
-#    --no-default-features: Disables 'webview-auth' to prevent launching a window.
-#    Note: It still requires GTK to link, but won't use it at runtime in CLI mode.
+#    --no-default-features: Disables 'webview-auth' (embedded browser window).
 RUN cargo build --release -p gpclient --no-default-features
 
 # 2. Build gpauth
@@ -44,7 +44,7 @@ FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install runtime libs
-# Added: libgtk-3-0 (Required for shared library linking)
+# libgtk-3-0 is required for the binaries to start (shared library linking)
 RUN apt-get update && apt-get install -y \
     libopenconnect5 \
     ca-certificates \
