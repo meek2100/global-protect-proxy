@@ -7,8 +7,8 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
-      - "1080:1080" # SOCKS Proxy
-      - "8000:8000" # Captive Portal Dashboard
+      - "1080:1080"
+      - "8000:8000"
     environment:
       - VPN_PORTAL=lehvpn.snapone.com
     restart: unless-stopped

@@ -1,7 +1,10 @@
+# Stage 1: Build from Source
 FROM rust:1.85-bookworm AS builder
 
-# 1. Install build tools
-# We must install these because the Docker container is empty.
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 1. Install extended build dependencies
+# 'gettext', 'autopoint', 'bison', 'flex' are CRITICAL for building openconnect from git.
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
@@ -16,6 +19,10 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libxml2-dev \
     patch \
+    gettext \
+    autopoint \
+    bison \
+    flex \
     --no-install-recommends
 
 WORKDIR /usr/src/app
@@ -23,16 +30,20 @@ WORKDIR /usr/src/app
 # 2. Clone the Stable Release (v2.5.1)
 RUN git clone --branch v2.5.1 --depth 1 https://github.com/yuezk/GlobalProtect-openconnect.git .
 
-# 3. Initialize Submodules (Critical for openconnect-sys)
+# 3. Initialize Submodules
 RUN git submodule update --init --recursive
 
-# 4. Build using the Official Makefile
-# We disable GUI and FE to save space/time, but we installed the deps above so it won't crash.
+# 4. Build
+# We limit concurrency to prevent OOM kills on smaller runners
+ENV CARGO_BUILD_JOBS=2
 RUN make build BUILD_GUI=0 BUILD_FE=0
 
-# --- Runtime Stage ---
-FROM debian:trixie-slim
+# --- Stage 2: Runtime ---
+FROM debian:bookworm-slim
 
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     libopenconnect5 \
     ca-certificates \
