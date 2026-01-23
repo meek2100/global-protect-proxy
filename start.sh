@@ -5,7 +5,7 @@ set -e
 echo "Starting Microsocks..."
 microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &
 
-# 2. Start Status Dashboard (Port 8000)
+# 2. Start Status Dashboard (Port 8001 - CHANGED)
 mkdir -p /var/www/html
 cat <<EOF > /var/www/html/index.html
 <html><head><meta http-equiv="refresh" content="5"></head>
@@ -13,10 +13,12 @@ cat <<EOF > /var/www/html/index.html
 <h1>VPN Status: <span style="color:orange;">Booting...</span></h1></body></html>
 EOF
 
-python3 -m http.server 8000 --directory /var/www/html > /dev/null 2>&1 &
+# Run Python HTTP Server on 8001
+python3 -m http.server 8001 --directory /var/www/html > /dev/null 2>&1 &
 
 # 3. Start VPN Service
 echo "Starting GlobalProtect Service..."
+# The official binary is installed to /usr/bin/gpservice
 gpservice &
 SERVICE_PID=$!
 sleep 2
@@ -26,7 +28,7 @@ echo "Starting Connection Monitor..."
 (
     LOG_FILE="/tmp/vpn.log"
     while true; do
-        # Try to connect.
+        # Connect with "Remote Browser" mode
         gpclient connect "$VPN_PORTAL" --browser remote --fix-openssl > "$LOG_FILE" 2>&1 &
         CLIENT_PID=$!
 
@@ -34,10 +36,13 @@ echo "Starting Connection Monitor..."
         while kill -0 $CLIENT_PID 2>/dev/null; do
             if grep -q "https://" "$LOG_FILE"; then
                 AUTH_URL=$(grep -o "https://[^ ]*" "$LOG_FILE" | head -1)
+
+                # Update Dashboard (RED)
                 cat <<EOF > /var/www/html/index.html
 <html><head><meta http-equiv="refresh" content="5"></head>
 <body style="background:#ffe6e6;font-family:sans-serif;text-align:center;padding:50px;">
 <h1 style="color:red;">⚠️ VPN NEEDS LOGIN</h1>
+<p>Portainer is using port 8000, so we are on 8001.</p>
 <div style="border:2px solid red;padding:20px;background:white;display:inline-block;">
 <h2><a href="$AUTH_URL" target="_blank">CLICK HERE TO AUTHENTICATE</a></h2>
 </div><br><br><pre>$(tail -n 5 $LOG_FILE)</pre></body></html>
@@ -45,6 +50,7 @@ EOF
             fi
 
             if grep -q "Connected" "$LOG_FILE"; then
+                # Update Dashboard (GREEN)
                 cat <<EOF > /var/www/html/index.html
 <html><head><meta http-equiv="refresh" content="60"></head>
 <body style="background:#e6fffa;font-family:sans-serif;text-align:center;padding:50px;">
