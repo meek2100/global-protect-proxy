@@ -1,14 +1,14 @@
 services:
   vpn-proxy:
-    build: .
+    # We removed "build: ." so Portainer pulls the pre-built image
     image: ghcr.io/meek2100/global-protect-proxy:latest
     container_name: globalprotect-vpn
     cap_add:
-      - NET_ADMIN # Required for creating the VPN network interface (tun0)
+      - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
-      - "1080:1080" # Maps the SOCKS proxy to your host
+      - "1080:1080"
     environment:
-      - VPN_PORTAL=lehvpn.snapone.com
+      - VPN_PORTAL=vpn.yourcompany.com
     restart: unless-stopped
