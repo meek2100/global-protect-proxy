@@ -1,16 +1,19 @@
 #!/bin/bash
 set -e
 
-# 1. Start SOCKS Proxy
+# 1. Start SOCKS5 Proxy (Port 1080)
 echo "Starting Microsocks..."
 microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &
 
-# 2. Start a Status Dashboard (Python HTTP Server)
-# This will serve a page at http://<VM-IP>:8000
-mkdir -p /var/www/html
-echo "<html><h1>VPN Starting...</h1></html>" > /var/www/html/index.html
-cd /var/www/html
-python3 -m http.server 8000 &
+# 2. Start Status Dashboard (Port 8000)
+# Create a placeholder page initially
+cat <<EOF > /var/www/html/index.html
+<html><head><meta http-equiv="refresh" content="5"></head>
+<body style="font-family:sans-serif;text-align:center;padding:50px;">
+<h1>VPN Status: <span style="color:orange;">Booting...</span></h1></body></html>
+EOF
+
+python3 -m http.server 8000 --directory /var/www/html > /dev/null 2>&1 &
 
 # 3. Start VPN Service
 echo "Starting GlobalProtect Service..."
@@ -18,28 +21,47 @@ gpservice &
 SERVICE_PID=$!
 sleep 2
 
-# 4. Connect Loop with "Captive" Status Page
-echo "Initializing Connection..."
-
-# Generate the Auth URL but capture it to a file so we can show it on the web page
-# Note: This is a best-effort wrapper.
-gpclient connect "$VPN_PORTAL" --browser remote --fix-openssl > /tmp/vpn.log 2>&1 &
-CLIENT_PID=$!
-
-# Monitor the log for the Auth URL and update index.html
+# 4. Connection Loop (The "Captive Portal" Logic)
+echo "Starting Connection Monitor..."
 (
+    LOG_FILE="/tmp/vpn.log"
     while true; do
-        if grep -q "https://" /tmp/vpn.log; then
-            AUTH_URL=$(grep -o "https://[^ ]*" /tmp/vpn.log | head -1)
-            echo "<html><head><meta http-equiv='refresh' content='5'></head><body>" > /var/www/html/index.html
-            echo "<h1>⚠️ VPN Action Required</h1>" >> /var/www/html/index.html
-            echo "<p>The VPN needs you to login. Click the link below to authenticate on your laptop:</p>" >> /var/www/html/index.html
-            echo "<h2><a href='$AUTH_URL' target='_blank'>CLICK HERE TO LOGIN</a></h2>" >> /var/www/html/index.html
-            echo "<pre>$(tail -n 10 /tmp/vpn.log)</pre></body></html>" >> /var/www/html/index.html
-        fi
+        # Try to connect. This blocks until auth is needed or connection succeeds.
+        gpclient connect "$VPN_PORTAL" --browser remote --fix-openssl > "$LOG_FILE" 2>&1 &
+        CLIENT_PID=$!
+
+        # Monitor the client process
+        while kill -0 $CLIENT_PID 2>/dev/null; do
+            # Check for Auth URL
+            if grep -q "https://" "$LOG_FILE"; then
+                AUTH_URL=$(grep -o "https://[^ ]*" "$LOG_FILE" | head -1)
+
+                # Update Web Page to RED with Link
+                cat <<EOF > /var/www/html/index.html
+<html><head><meta http-equiv="refresh" content="5"></head>
+<body style="background:#ffe6e6;font-family:sans-serif;text-align:center;padding:50px;">
+<h1 style="color:red;">⚠️ VPN NEEDS LOGIN</h1>
+<div style="border:2px solid red;padding:20px;background:white;display:inline-block;">
+<h2><a href="$AUTH_URL" target="_blank">CLICK HERE TO AUTHENTICATE</a></h2>
+<p>Log in using the new tab, then wait for this page to turn green.</p>
+</div><br><br><pre>$(tail -n 5 $LOG_FILE)</pre></body></html>
+EOF
+            fi
+
+            # Check for Success
+            if grep -q "Connected" "$LOG_FILE"; then
+                cat <<EOF > /var/www/html/index.html
+<html><head><meta http-equiv="refresh" content="60"></head>
+<body style="background:#e6fffa;font-family:sans-serif;text-align:center;padding:50px;">
+<h1 style="color:green;">✅ VPN CONNECTED</h1>
+<p>Proxy active at port 1080</p></body></html>
+EOF
+            fi
+            sleep 2
+        done
         sleep 5
     done
 ) &
 
-# Wait for the client to finish (it usually stays running)
-wait $CLIENT_PID
+# Keep container alive
+wait $SERVICE_PID

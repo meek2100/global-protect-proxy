@@ -1,38 +1,38 @@
-# Stage 1: Build (The "Kitchen Sink" Builder)
 FROM rust:1.85-bookworm AS builder
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install ALL build dependencies, including GUI libs to satisfy the compiler
+# 1. Install build tools
+# We must install these because the Docker container is empty.
 RUN apt-get update && apt-get install -y \
-    libopenconnect-dev \
     build-essential \
-    git \
-    clang \
     cmake \
+    git \
     libssl-dev \
     libgtk-3-dev \
     libwebkit2gtk-4.1-dev \
     libappindicator3-dev \
+    automake \
+    autoconf \
+    libtool \
+    pkg-config \
+    libxml2-dev \
+    patch \
     --no-install-recommends
 
 WORKDIR /usr/src/app
 
-# Clone the STABLE release (v2.5.1) to avoid unstable 'master' patch errors
+# 2. Clone the Stable Release (v2.5.1)
 RUN git clone --branch v2.5.1 --depth 1 https://github.com/yuezk/GlobalProtect-openconnect.git .
 
-# Build everything (we build 'release' to optimize size)
-# We STILL use --no-default-features to try and minimize runtime linking
-RUN cargo build --release -p gpclient --no-default-features
-RUN cargo build --release -p gpauth --no-default-features
-RUN cargo build --release -p gpservice
+# 3. Initialize Submodules (Critical for openconnect-sys)
+RUN git submodule update --init --recursive
 
-# Stage 2: Runtime (Minimal)
+# 4. Build using the Official Makefile
+# We disable GUI and FE to save space/time, but we installed the deps above so it won't crash.
+RUN make build BUILD_GUI=0 BUILD_FE=0
+
+# --- Runtime Stage ---
 FROM debian:trixie-slim
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install runtime dependencies required for VPN + Headerless Browser Support
 RUN apt-get update && apt-get install -y \
     libopenconnect5 \
     ca-certificates \
@@ -41,20 +41,19 @@ RUN apt-get update && apt-get install -y \
     iproute2 \
     iptables \
     libgtk-3-0 \
+    python3 \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy binaries
-COPY --from=builder /usr/src/app/target/release/gpclient /usr/local/bin/gpclient
-COPY --from=builder /usr/src/app/target/release/gpservice /usr/local/bin/gpservice
-COPY --from=builder /usr/src/app/target/release/gpauth /usr/local/bin/gpauth
+COPY --from=builder /usr/src/app/target/release/gpclient /usr/local/bin/
+COPY --from=builder /usr/src/app/target/release/gpservice /usr/local/bin/
+COPY --from=builder /usr/src/app/target/release/gpauth /usr/local/bin/
 
-# Copy startup script
+# Setup Environment
+RUN mkdir -p /etc/gpservice /var/www/html
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-RUN mkdir -p /etc/gpservice
-
 EXPOSE 1080 8000
-
 ENTRYPOINT ["/start.sh"]
