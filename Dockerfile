@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     git \
     libssl-dev \
     libgtk-3-dev \
-    libwebkit2gtk-4.0-dev \
+    libwebkit2gtk-4.1-dev \
     libayatana-appindicator3-dev \
     liblz4-dev \
     libgnutls28-dev \
