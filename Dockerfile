@@ -1,41 +1,72 @@
-# Use Debian Bookworm (Stable)
+# Build Stage
+FROM rust:1.85-bookworm AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    libssl-dev \
+    libgtk-3-dev \
+    libwebkit2gtk-4.0-dev \
+    libappindicator3-dev \
+    automake \
+    autoconf \
+    libtool \
+    pkg-config \
+    libxml2-dev \
+    patch \
+    gettext \
+    autopoint \
+    bison \
+    flex \
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/src/app
+
+# Copy source code
+COPY GlobalProtect-openconnect-2.5.1 .
+
+# Manually fetch submodules (since .git directory is missing)
+RUN git clone https://gitlab.gnome.org/GNOME/libxml2.git crates/openconnect/deps/libxml2 && \
+    cd crates/openconnect/deps/libxml2 && \
+    git checkout f8a8c1f59db355b46962577e7b74f1a1e8149dc6 && \
+    cd - && \
+    git clone https://gitlab.com/openconnect/openconnect.git crates/openconnect/deps/openconnect && \
+    cd crates/openconnect/deps/openconnect && \
+    git checkout 0dcdff87db65daf692dc323732831391d595d98d && \
+    cd -
+
+# Build the application
+RUN make build BUILD_GUI=0 BUILD_FE=0
+
+# Runtime Stage
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 1. Install Runtime Dependencies
-# We install 'curl' to download the .deb
-# apt will automatically pull in the GUI libs (libgtk-3-0) required by the binary
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y \
-    curl \
-    ca-certificates \
     microsocks \
+    python3 \
     iproute2 \
     iptables \
-    python3 \
-    --no-install-recommends
-
-# 2. Download and Install the Official Release (v2.5.1)
-WORKDIR /tmp
-RUN curl -LO https://github.com/yuezk/GlobalProtect-openconnect/releases/download/v2.5.1/globalprotect-openconnect_2.5.1-1_amd64.deb && \
-    apt-get install -y ./globalprotect-openconnect_2.5.1-1_amd64.deb && \
-    rm globalprotect-openconnect_2.5.1-1_amd64.deb && \
+    libgtk-3-0 \
+    ca-certificates \
+    --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
-# 3. THE FIX: Neuter the GUI binary
-# The official app tries to launch 'gpgui' and crashes if running as root.
-# We replace it with a dummy script that sleeps forever so gpservice thinks it's running.
-RUN rm /usr/bin/gpgui && \
-    echo '#!/bin/bash\nwhile true; do sleep 3600; done' > /usr/bin/gpgui && \
-    chmod +x /usr/bin/gpgui
+# Copy binaries
+COPY --from=builder /usr/src/app/target/release/gpclient /usr/local/bin/
+COPY --from=builder /usr/src/app/target/release/gpservice /usr/local/bin/
+COPY --from=builder /usr/src/app/target/release/gpauth /usr/local/bin/
 
-# 4. Setup Environment
-RUN mkdir -p /var/www/html
-
+# Setup start script
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# Expose SOCKS5 (1080) and Dashboard (8001)
+# Expose ports
 EXPOSE 1080 8001
 
 ENTRYPOINT ["/start.sh"]
