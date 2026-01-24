@@ -2,7 +2,12 @@ name: Build and Publish Docker Image
 
 on:
   push:
-    branches: ["main", "master"]
+    # Only build automatically on tags (Production Releases)
+    tags: ["v*.*.*"]
+    # Do not build automatically on branch pushes
+    branches-ignore: ["**"]
+
+  # Allow manual builds for any branch
   workflow_dispatch:
 
 env:
@@ -35,7 +40,13 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: type=raw,value=latest
+          tags: |
+            # Tag with branch name (e.g., dev, main) for manual runs
+            type=ref,event=branch
+            # Tag with git tag (e.g., v1.0.0) for releases
+            type=ref,event=tag
+            # 'latest' tag is ONLY applied when building from a git tag
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
