@@ -1,9 +1,0 @@
-{
-    "recommendations": [
-        "rust-lang.rust-analyzer",
-        "tamasfe.even-better-toml",
-        "eamodio.gitlens",
-        "EditorConfig.EditorConfig",
-        "streetsidesoftware.code-spell-checker",
-    ]
-}
