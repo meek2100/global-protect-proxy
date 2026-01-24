@@ -18,7 +18,6 @@ python3 -m http.server 8001 --directory /var/www/html > /dev/null 2>&1 &
 
 # 3. Start VPN Service
 echo "Starting GlobalProtect Service..."
-# The official binary is installed to /usr/bin/gpservice
 gpservice &
 SERVICE_PID=$!
 sleep 2
