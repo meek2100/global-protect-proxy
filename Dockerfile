@@ -30,6 +30,13 @@ WORKDIR /usr/src/app
 # Clone source code from GitHub
 RUN git clone --branch v2.5.1 --recursive https://github.com/yuezk/GlobalProtect-openconnect.git .
 
+# --- PATCH: Disable Root Check ---
+# 1. Identify files containing the specific error string.
+# 2. Replace the 'if' condition on that line (likely checking for root) with 'if false {'.
+# This prevents the service from panicking when running as root (PID 1) in Docker.
+RUN grep -rl "cannot be run as root" . | xargs sed -i 's/if.*root.*/if false {/'
+# ---------------------------------
+
 # Build the application
 RUN make build BUILD_GUI=0 BUILD_FE=0
 
