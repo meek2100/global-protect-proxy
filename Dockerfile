@@ -25,18 +25,8 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /usr/src/app
 
-# Copy source code
-COPY GlobalProtect-openconnect-2.5.1 .
-
-# Manually fetch submodules (since .git directory is missing)
-RUN git clone https://gitlab.gnome.org/GNOME/libxml2.git crates/openconnect/deps/libxml2 && \
-    cd crates/openconnect/deps/libxml2 && \
-    git checkout f8a8c1f59db355b46962577e7b74f1a1e8149dc6 && \
-    cd - && \
-    git clone https://gitlab.com/openconnect/openconnect.git crates/openconnect/deps/openconnect && \
-    cd crates/openconnect/deps/openconnect && \
-    git checkout 0dcdff87db65daf692dc323732831391d595d98d && \
-    cd -
+# Clone source code from GitHub
+RUN git clone --branch v2.5.1 --recursive https://github.com/yuezk/GlobalProtect-openconnect.git .
 
 # Build the application
 RUN make build BUILD_GUI=0 BUILD_FE=0
