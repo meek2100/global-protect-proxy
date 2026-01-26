@@ -69,21 +69,37 @@ HTML
             # B. Needs Auth (Resolve URL)
             elif grep -qE \"https?://.*/.*\" \$LOG_FILE; then
 
-                # Extract LOCAL URL (e.g. http://172.x.x.x...)
+                # Extract LOCAL URL
                 LOCAL_URL=\$(grep -oE \"https?://[^ ]+\" \$LOG_FILE | tail -1)
 
-                # --- FIX: Use Python to Resolve Redirect ---
-                # This is more reliable than curl. It hits the local link, follows the 302 redirect,
-                # and prints the final public SSO URL.
-                REAL_URL=\$(python3 -c \"import urllib.request; print(urllib.request.urlopen('\$LOCAL_URL').geturl())\" 2>/dev/null)
+                # === DEBUG BLOCK ===
+                # 1. Log what we found
+                echo \"DEBUG: Found Internal URL: \$LOCAL_URL\" >> \$LOG_FILE
 
-                # Fallback if Python fails
+                # 2. Attempt Resolution with Error Capture
+                # We intentionally unset http_proxy here to ensure we don't hit microsocks
+                REAL_URL=\$(export http_proxy=; export https_proxy=; python3 -c \"
+import urllib.request
+import sys
+try:
+    url = '\$LOCAL_URL'
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req) as response:
+        print(response.geturl())
+except Exception as e:
+    print(f'ERROR: {e}', file=sys.stderr)
+\" 2>> \$LOG_FILE)
+
+                # 3. Log the Result
                 if [ -z \"\$REAL_URL\" ]; then
+                     echo \"DEBUG: Resolution FAILED. See stderr above.\" >> \$LOG_FILE
+                     LINK_TEXT=\"Click to Login (Internal IP - Might Fail)\"
                      REAL_URL=\"\$LOCAL_URL\"
-                     LINK_TEXT=\"Click to Login (May fail if internal IP)\"
                 else
+                     echo \"DEBUG: Resolution SUCCESS: \$REAL_URL\" >> \$LOG_FILE
                      LINK_TEXT=\"Click to Login (SSO)\"
                 fi
+                # ===================
 
                 # Update Dashboard
                 cat <<HTML > /var/www/html/index.html
@@ -93,11 +109,7 @@ HTML
     <style>
         body { font-family: sans-serif; text-align: center; padding: 40px; background: #fff0f0; }
         .card { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 600px; margin: 0 auto; }
-        input[type=text] { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        input[type=submit] { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; }
-        input[type=submit]:hover { background: #0056b3; }
         .btn-link { display: inline-block; padding: 12px 24px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-weight: bold; margin-bottom: 20px; }
-        .debug { text-align: left; background: #eee; padding: 10px; margin-top: 30px; overflow-x: auto; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -115,10 +127,9 @@ HTML
             <input type=\"submit\" value=\"Submit Code\">
         </form>
     </div>
-
-    <div class=\"debug\">
+    <div style=\"text-align:left; background:#eee; padding:10px; margin-top:30px; overflow-x:auto;\">
         <strong>Debug Log:</strong><br>
-        \$(tail -n 3 \$LOG_FILE)
+        <pre>\$(tail -n 10 \$LOG_FILE)</pre>
     </div>
 </body>
 </html>
@@ -127,8 +138,6 @@ HTML
 
             sleep 2
         done
-
-        echo \"gpclient process exited. Retrying in 5 seconds...\" >> \$LOG_FILE
         sleep 5
     done
 " &
