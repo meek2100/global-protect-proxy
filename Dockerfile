@@ -20,10 +20,9 @@ RUN mkdir -p /opt/novnc/utils/websockify && \
     wget -qO- https://github.com/novnc/noVNC/archive/v1.4.0.tar.gz | tar xz --strip 1 -C /opt/novnc && \
     wget -qO- https://github.com/novnc/websockify/archive/v0.11.0.tar.gz | tar xz --strip 1 -C /opt/novnc/utils/websockify
 
-# 3. Install GlobalProtect (FROM LOCAL FILE)
-#    We COPY the file you bundled instead of downloading it.
-COPY globalprotect-openconnect_2.5.1-1_amd64.deb /tmp/gp.deb
-RUN apt-get install -y /tmp/gp.deb && \
+# 3. Install GlobalProtect
+RUN wget -q https://github.com/yuezk/GlobalProtect-openconnect/releases/download/v2.5.1/globalprotect-openconnect_2.5.1-1_amd64.deb -O /tmp/gp.deb && \
+    apt-get install -y /tmp/gp.deb && \
     rm /tmp/gp.deb
 
 # 4. Setup User & Permissions
