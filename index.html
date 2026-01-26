@@ -40,11 +40,6 @@
             font-size: 16px;
         }
 
-        .btn-green {
-            background: #28a745;
-        }
-
-        /* The VNC Window */
         #vnc-container {
             width: 100%;
             height: 600px;
@@ -78,8 +73,8 @@
     <div class="container">
         <div class="status-bar">
             <div>Status: <strong id="status-text">Disconnected</strong></div>
-            <form action="/connect" method="POST" id="connect-form">
-                <button type="submit" class="btn" id="connect-btn">Launch Browser & Connect</button>
+            <form action="/connect" method="POST">
+                <button type="submit" class="btn">Launch Browser & Connect</button>
             </form>
         </div>
 
@@ -95,7 +90,7 @@
     </div>
 
     <script>
-        const vncPort = 8002; // Port forwarded in Docker
+        const vncPort = 8002;
         const vncPath = "vnc.html?autoconnect=true&reconnect=true&resize=scale&host=" + window.location.hostname + "&port=" + vncPort;
 
         async function pollStatus() {
@@ -109,7 +104,6 @@
                 if (data.state === 'auth' || data.state === 'connecting') {
                     document.getElementById('vnc-overlay').style.display = 'none';
                     if (!document.getElementById('vnc-frame').src) {
-                        // Start VNC stream
                         document.getElementById('vnc-frame').src = "http://" + window.location.hostname + ":" + vncPort + "/" + vncPath;
                     }
                 }
@@ -118,7 +112,6 @@
                     document.getElementById('vnc-overlay').style.display = 'flex';
                     document.getElementById('vnc-overlay').innerHTML = "<h1>✅ Connected!</h1>";
                 }
-
             } catch (e) { }
         }
         setInterval(pollStatus, 1000);

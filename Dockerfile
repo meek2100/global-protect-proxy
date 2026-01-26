@@ -2,7 +2,7 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 1. Install Dependencies (Firefox, VNC, Window Manager, Audio)
+# 1. Install Dependencies (Firefox, VNC, Window Manager)
 RUN apt-get update && apt-get install -y \
     wget curl ca-certificates \
     microsocks python3 python3-numpy \
@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
-# 2. Install noVNC (HTML5 VNC Client)
+# 2. Install noVNC (Web-based VNC viewer)
 RUN mkdir -p /opt/novnc/utils/websockify && \
     wget -qO- https://github.com/novnc/noVNC/archive/v1.4.0.tar.gz | tar xz --strip 1 -C /opt/novnc && \
     wget -qO- https://github.com/novnc/websockify/archive/v0.11.0.tar.gz | tar xz --strip 1 -C /opt/novnc/utils/websockify
@@ -29,11 +29,11 @@ RUN useradd -m -s /bin/bash gpuser
 RUN mkdir -p /var/lib/dbus && dbus-uuidgen > /var/lib/dbus/machine-id
 RUN setcap 'cap_net_admin+ep' /usr/bin/gpservice
 
-# 5. Setup Protocol Handler (The Magic)
-# This tells the OS: "If you see globalprotectcallback://, run gp-handler.sh"
+# 5. Setup Protocol Handler (The Automation Fix)
 COPY gp-handler.sh /usr/local/bin/gp-handler.sh
 RUN chmod +x /usr/local/bin/gp-handler.sh
 RUN mkdir -p /usr/share/applications
+# Register the handler for the specific protocol
 RUN echo "[Desktop Entry]\nName=GlobalProtect Handler\nExec=/usr/local/bin/gp-handler.sh %u\nType=Application\nTerminal=false\nMimeType=x-scheme-handler/globalprotectcallback;" > /usr/share/applications/gp-handler.desktop
 RUN update-desktop-database /usr/share/applications
 
@@ -46,7 +46,7 @@ COPY index.html /var/www/html/index.html
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# 8001 for UI, 8002 for VNC Websocket
+# Ports: 1080 (Proxy), 8001 (UI), 8002 (VNC)
 EXPOSE 1080 8001 8002
 
 ENTRYPOINT ["/start.sh"]
