@@ -1,55 +1,90 @@
+# --- Build Stage ---
+FROM rust:bookworm AS builder
+
+# 1. Install EXACT Build Dependencies from README
+#    We include 'libopenconnect-dev' and the 'Tauri dependencies' list provided.
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    curl \
+    wget \
+    file \
+    libssl-dev \
+    libxml2-dev \
+    libwebkit2gtk-4.1-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev \
+    libxdo-dev \
+    libopenconnect-dev \
+    patch \
+    gettext \
+    autopoint \
+    bison \
+    flex \
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/src/app
+
+# 2. Clone source code (v2.5.1)
+RUN git clone --branch v2.5.1 --recursive https://github.com/yuezk/GlobalProtect-openconnect.git .
+
+
+# 3. Build the application (Headless)
+#    BUILD_GUI=0: Don't build the GUI app
+#    BUILD_FE=0: Don't build the frontend assets (we don't need them for CLI)
+RUN make build BUILD_GUI=0 BUILD_FE=0
+
+
+# --- Runtime Stage ---
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 1. Install runtime dependencies
-#    - curl: REQUIRED for start.sh to resolve the SSO URL (Fixes "command not found")
-#    - dbus-x11: Fixes "No such file" errors for D-Bus
-#    - xvfb: Virtual display for the GUI
-#    - vpnc-scripts & gnome-keyring: GlobalProtect dependencies
+# 1. Install Runtime Dependencies
+#    - microsocks: For the SOCKS5 proxy functionality
+#    - python3: For the local webserver (server.py)
+#    - iptables/iproute2: For Gateway NAT
+#    - openconnect/vpnc-scripts: Runtime support for VPN
+#    - libwebkit2gtk-4.1-0: Shared library often required by the binary even in CLI mode
 RUN apt-get update && apt-get install -y \
-    wget \
-    ca-certificates \
     microsocks \
     python3 \
     iptables \
     iproute2 \
     libcap2-bin \
-    libgtk-3-0 \
+    curl \
+    ca-certificates \
     libwebkit2gtk-4.1-0 \
     libayatana-appindicator3-1 \
-    librsvg2-common \
     vpnc-scripts \
-    gnome-keyring \
-    xvfb \
-    dbus-x11 \
-    curl \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
-# 2. Download and Install the Pre-built .deb
-RUN wget -q https://github.com/yuezk/GlobalProtect-openconnect/releases/download/v2.5.1/globalprotect-openconnect_2.5.1-1_amd64.deb -O /tmp/gp.deb && \
-    apt-get install -y /tmp/gp.deb && \
-    rm /tmp/gp.deb
-
-# 3. Create a non-root user 'gpuser'
+# 2. Create non-root user
 RUN useradd -m -s /bin/bash gpuser
 
-# 4. Generate Machine ID for D-Bus
-RUN mkdir -p /var/lib/dbus && dbus-uuidgen > /var/lib/dbus/machine-id
+# 3. Copy Binaries from Builder
+#    We only copy the CLI tools. 'gpgui-helper' is intentionally omitted.
+COPY --from=builder /usr/src/app/target/release/gpclient /usr/bin/
+COPY --from=builder /usr/src/app/target/release/gpservice /usr/bin/
+COPY --from=builder /usr/src/app/target/release/gpauth /usr/bin/
 
-# 5. Grant Network Capabilities
+# 4. Grant Network Capabilities
+#    Allows 'gpservice' to manage tun0 without running as full root
 RUN setcap 'cap_net_admin+ep' /usr/bin/gpservice
 
-# 6. Setup directories
+# 5. Setup Directories & Permissions
 RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \
     chown -R gpuser:gpuser /var/www/html /tmp/gp-logs /run/dbus
 
-# 7. Copy Web Files (NEW)
+# 6. Copy Web Interface
 COPY server.py /var/www/html/server.py
 COPY index.html /var/www/html/index.html
 
-# 8. Setup start script
+# 7. Install Start Script
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 

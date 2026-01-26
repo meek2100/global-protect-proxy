@@ -11,9 +11,7 @@ echo "=== Network Setup ==="
 echo 1 > /proc/sys/net/ipv4/ip_forward
 
 # Configure NAT/Masquerade for Gateway Mode
-# Traffic leaving via tun0 (VPN) should be masqueraded
 iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
-# Allow forwarding between LAN (eth0) and VPN (tun0)
 iptables -A FORWARD -i eth0 -o tun0 -j ACCEPT
 iptables -A FORWARD -i tun0 -o eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 
@@ -25,11 +23,9 @@ write_state() {
     URL="$2"
     TEXT="$3"
 
-    # Escape quotes for JSON safely
     SAFE_URL=$(echo "$URL" | sed 's/"/\\"/g')
     SAFE_TEXT=$(echo "$TEXT" | sed 's/"/\\"/g')
-
-    # Grab last 20 lines for better debugging
+    # Grab last 20 lines for debugging
     LOG_CONTENT=$(tail -n 20 "$LOG_FILE" 2>/dev/null | awk '{printf "%s\\n", $0}' | sed 's/"/\\"/g')
 
     cat <<JSON > "$STATUS_FILE.tmp"
@@ -44,10 +40,6 @@ JSON
 }
 
 echo "=== Container Started ==="
-
-# --- DEBUG: Check Disk Space ---
-echo "Checking disk space..."
-df -h /var/run || echo "Cannot check disk space"
 
 # --- SETUP: Permissions & Pipes ---
 rm -f /var/run/gpservice.lock /tmp/gp-stdin /tmp/gp-control
@@ -80,8 +72,9 @@ else
     echo "WARNING: server.py missing!"
 fi
 
-echo "Starting GlobalProtect Service..."
-su - gpuser -c "xvfb-run -a /usr/bin/gpservice &"
+echo "Starting GlobalProtect Service (Headless)..."
+# Note: No xvfb-run needed for headless build
+su - gpuser -c "/usr/bin/gpservice &"
 sleep 1
 
 # Stream logs
@@ -99,24 +92,20 @@ write_state "connecting" "" ""
 echo "State: CONNECTING..."
 
 # 3. Connection Loop
-# We export the VPN_PORTAL variable so the inner shell can see it
 export VPN_PORTAL
 
 su - gpuser -c "
     exec 3<> /tmp/gp-stdin
-
-    # CRITICAL FIX: Clear log on new run to prevent stale URL detection
     > \"$LOG_FILE\"
 
     while true; do
-        echo \"Attempting connection...\" >> \"$LOG_FILE\"
+        echo \"Attempting connection to \$VPN_PORTAL...\" >> \"$LOG_FILE\"
 
-        # --- TTY FIX: Use 'script' to fake a TTY ---
-        # We construct the command carefully to avoid quoting issues
+        # --- TTY FIX & Headless Browser ---
+        # --browser remote: Generates a URL for us to scrape
         CMD=\"gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote\"
 
-        # script -q (quiet) -c (command) /dev/null (output sink)
-        # We pipe the FIFO (FD 3) into script's stdin, which forwards to the PTY
+        # Use script to fake a TTY, pipe stdin from our FIFO
         script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1 &
         CLIENT_PID=\$!
 
@@ -128,31 +117,27 @@ su - gpuser -c "
 JSON
                 mv $STATUS_FILE.tmp $STATUS_FILE
 
-            # 2. CHECK AUTH REQUIRED
+            # 2. CHECK AUTH REQUIRED (Extract SSO URL)
             elif grep -qE \"https?://.*/.*\" \"$LOG_FILE\"; then
+                 # Grab the last http link found in the log
                  LOCAL_URL=\$(grep -oE \"https?://[^ ]+\" \"$LOG_FILE\" | tail -1)
 
-                 # --- VERBOSE RESOLUTION SCRIPT ---
+                 # Attempt to resolve localhost redirects if possible, or just pass it through
                  REAL_URL=\$(export http_proxy=; export https_proxy=; python3 -c \"
 import urllib.request, sys
 try:
     url = '\$LOCAL_URL'
-    print(f'DEBUG: Resolving {url}...', file=sys.stderr)
-    req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=5) as r:
-        final_url = r.geturl()
-        print(f'DEBUG: Resolved to {final_url}', file=sys.stderr)
-        print(final_url)
+    print(f'DEBUG: Found URL {url}', file=sys.stderr)
+    print(url)
 except Exception as e:
     print(f'DEBUG_ERROR: {e}', file=sys.stderr)
 \" 2>> \"$LOG_FILE\")
 
                  if [ -z \"\$REAL_URL\" ]; then
                      REAL_URL=\"\$LOCAL_URL\"
-                     LINK_TEXT=\"Internal IP (May Fail)\"
-                 else
-                     LINK_TEXT=\"Open Login Page (SSO)\"
                  fi
+
+                 LINK_TEXT=\"Open Login Page (SSO)\"
 
                  LOG_CONTENT=\$(tail -n 20 \"$LOG_FILE\" | awk '{printf \"%s\\\\n\", \$0}' | sed 's/\"/\\\\\"/g')
 
