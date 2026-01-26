@@ -3,7 +3,7 @@ set -e
 
 echo "=== Container Started ==="
 
-# --- SETUP: Permissions, Pipes, and Logs ---
+# --- SETUP: Permissions & Pipes ---
 rm -f /var/run/gpservice.lock /tmp/gp-stdin
 touch /var/run/gpservice.lock
 chown gpuser:gpuser /var/run/gpservice.lock
@@ -15,94 +15,50 @@ chmod 600 /tmp/gp-stdin
 mkdir -p /tmp/gp-logs
 touch /tmp/gp-logs/vpn.log
 chown -R gpuser:gpuser /tmp/gp-logs
-# -------------------------------------------
+# ----------------------------------
 
 # 1. Start Microsocks (Proxy)
 echo "Starting Microsocks..."
 su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
 
-# 2. Create the Python Web Server (Form Handler)
-#    This creates a mini-server that takes your pasted code and writes it to the pipe.
-cat <<'EOF' > /var/www/html/server.py
-import http.server
-import socketserver
-import os
-import urllib.parse
-
-PORT = 8001
-FIFO_PATH = "/tmp/gp-stdin"
-
-class Handler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/":
-            self.path = "/index.html"
-        return http.server.SimpleHTTPRequestHandler.do_GET(self)
-
-    def do_POST(self):
-        if self.path == "/submit":
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length).decode('utf-8')
-            parsed_data = urllib.parse.parse_qs(post_data)
-
-            if 'callback_url' in parsed_data:
-                callback_value = parsed_data['callback_url'][0].strip()
-                print(f"Received Callback: {callback_value}")
-
-                try:
-                    # Write the code into the Named Pipe
-                    with open(FIFO_PATH, 'w') as fifo:
-                        fifo.write(callback_value + "\n")
-
-                    self.send_response(200)
-                    self.send_header("Content-type", "text/html")
-                    self.end_headers()
-                    self.wfile.write(b"<html><head><meta http-equiv='refresh' content='2;url=/'></head><body style='font-family:sans-serif;text-align:center;padding:50px;background:#e6fffa;'><h1>Code Sent!</h1><p>Checking connection...</p></body></html>")
-                except Exception as e:
-                    self.send_error(500, f"Error writing to FIFO: {e}")
-            else:
-                self.send_error(400, "No callback_url found")
-
-os.chdir("/var/www/html")
-# Allow address reuse to prevent 'Address already in use' on restarts
-socketserver.TCPServer.allow_reuse_address = True
-with socketserver.TCPServer(("", PORT), Handler) as httpd:
-    print(f"Serving Web Interface on port {PORT}")
-    httpd.serve_forever()
-EOF
-
-# 3. Create Initial Loading Page
+# 2. Create Initial Loading Page
 echo "<html><head><meta http-equiv='refresh' content='5'></head><body style='font-family:sans-serif;text-align:center;padding:50px;'><h1>VPN Status: <span style='color:orange;'>Booting...</span></h1><p>Waiting for gpclient...</p></body></html>" > /var/www/html/index.html
 chown -R gpuser:gpuser /var/www/html
 
-# 4. Start the Web Server (Background)
+# 3. Start the Web Server (Using the copied file)
 echo "Starting Web Interface..."
 su - gpuser -c "python3 /var/www/html/server.py > /tmp/gp-logs/web.log 2>&1 &"
 
-# 5. Start VPN Service (Headless Display)
+# 4. Start VPN Service
 echo "Starting GlobalProtect Service..."
 su - gpuser -c "xvfb-run -a /usr/bin/gpservice &"
 sleep 5
 
-# --- Stream logs to Docker Output (for debugging) ---
+# --- Stream logs to Docker Output ---
 tail -f /tmp/gp-logs/vpn.log &
 
-# 6. Connection Monitor Loop
+# 5. Connection Monitor Loop
 echo "Starting Connection Monitor..."
 su - gpuser -c "
+    # CRITICAL FIX: Open the pipe for Read+Write (fd 3)
+    # This prevents the shell from blocking while waiting for a writer.
+    exec 3<> /tmp/gp-stdin
+
     LOG_FILE=\"/tmp/gp-logs/vpn.log\"
     VPN_PORTAL=\"$VPN_PORTAL\"
 
     while true; do
         echo \"Attempting connection to \$VPN_PORTAL...\" >> \$LOG_FILE
 
-        # Connect using the FIFO for input
-        gpclient --fix-openssl connect \"\$VPN_PORTAL\" --browser remote < /tmp/gp-stdin >> \$LOG_FILE 2>&1 &
+        # Connect using the persistent pipe (fd 3)
+        # We use --fix-openssl as established previously
+        gpclient --fix-openssl connect \"\$VPN_PORTAL\" --browser remote <&3 >> \$LOG_FILE 2>&1 &
         CLIENT_PID=\$!
 
         # Monitor the active client process
         while kill -0 \$CLIENT_PID 2>/dev/null; do
 
-            # A. Check for 'Connected' State
+            # A. Connected
             if grep -q \"Connected\" \$LOG_FILE; then
                 cat <<HTML > /var/www/html/index.html
 <html><head><meta http-equiv=\"refresh\" content=\"60\"></head>
@@ -113,24 +69,18 @@ su - gpuser -c "
 </body></html>
 HTML
 
-            # B. Check for Authentication Request (HTTP or HTTPS)
-            #    We use grep -E to catch http OR https
+            # B. Needs Auth (Extract URL)
             elif grep -qE \"https?://.*/.*\" \$LOG_FILE; then
 
-                # 1. Extract the LOCAL internal link (e.g., http://172.22.0.2:41959/...)
+                # Extract LOCAL URL
                 LOCAL_URL=\$(grep -oE \"https?://[^ ]+\" \$LOG_FILE | tail -1)
 
-                # 2. RESOLVE the Real SSO Link
-                #    We curl the local link to get the 'Location:' redirect header.
-                #    This turns the unreachable internal IP into the reachable public SSO URL.
+                # Resolve to PUBLIC URL using curl inside container
+                # This fixes the issue where the link is an internal IP (172.x.x.x)
                 REAL_URL=\$(curl -s -I \"\$LOCAL_URL\" | grep -i \"Location:\" | awk '{print \$2}' | tr -d '\r')
+                if [ -z \"\$REAL_URL\" ]; then REAL_URL=\"\$LOCAL_URL\"; fi
 
-                # Fallback: If extraction fails, show local URL (better than nothing)
-                if [ -z \"\$REAL_URL\" ]; then
-                    REAL_URL=\"\$LOCAL_URL\"
-                fi
-
-                # 3. Generate the Dashboard
+                # Update Dashboard
                 cat <<HTML > /var/www/html/index.html
 <html>
 <head>

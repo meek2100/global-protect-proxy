@@ -43,7 +43,10 @@ RUN setcap 'cap_net_admin+ep' /usr/bin/gpservice
 RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \
     chown -R gpuser:gpuser /var/www/html /tmp/gp-logs /run/dbus
 
-# 7. Setup start script
+# 7. Copy Server Script (NEW)
+COPY server.py /var/www/html/server.py
+
+# 8. Setup start script
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
