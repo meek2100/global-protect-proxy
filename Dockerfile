@@ -18,9 +18,10 @@ RUN apt-get update && apt-get install -y \
     libcap2-bin vpnc-scripts gnome-keyring \
     xvfb dbus-x11 \
     firefox openbox x11vnc \
-    util-linux \
-    libwebkit2gtk-4.0-37 \
+    libgtk-3-0 \
+    libwebkit2gtk-4.1-0 \
     libayatana-appindicator3-1 \
+    librsvg2-common \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
