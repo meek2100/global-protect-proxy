@@ -29,45 +29,70 @@ JSON
     mv "$STATUS_FILE.tmp" "$STATUS_FILE"
 }
 
-# --- INITIALIZATION ---
 echo "=== Container Started ==="
+
+# --- DEBUG: Check Disk Space ---
+echo "Checking disk space..."
+df -h /var/run || echo "Cannot check disk space"
+
+# --- SETUP: Permissions & Pipes ---
+# 1. Force cleanup of old files (Fixes "Disk Full" lock issues)
+rm -f /var/run/gpservice.lock /tmp/gp-stdin /tmp/gp-control
+
+# 2. Create Lock File (With Error Check)
+if ! touch /var/run/gpservice.lock; then
+    echo "CRITICAL ERROR: Could not create lock file. Disk likely full or read-only."
+    exit 1
+fi
+chown gpuser:gpuser /var/run/gpservice.lock
+
+# 3. Create FIFO Pipes
+mkfifo /tmp/gp-stdin /tmp/gp-control
+chown gpuser:gpuser /tmp/gp-stdin /tmp/gp-control
+chmod 666 /tmp/gp-stdin /tmp/gp-control
+
+# 4. Logs
 mkdir -p /tmp/gp-logs
 touch "$LOG_FILE"
 chown -R gpuser:gpuser /tmp/gp-logs /var/www/html
+# ----------------------------------
 
-# Permissions & Pipes
-rm -f /var/run/gpservice.lock /tmp/gp-stdin /tmp/gp-control
-mkfifo /tmp/gp-stdin /tmp/gp-control
-chown gpuser:gpuser /var/run/gpservice.lock /tmp/gp-stdin /tmp/gp-control
-chmod 666 /tmp/gp-stdin /tmp/gp-control
-
-# 1. Start Services
+# 1. Start Microsocks (Proxy)
 echo "Starting Microsocks..."
 su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
 
+# 2. Start Web Server
 echo "Starting Web Interface..."
-# Ensure server.py is running to serve the static files and status.json
-su - gpuser -c "python3 /var/www/html/server.py > /tmp/gp-logs/web.log 2>&1 &"
+# Ensure server.py is running to serve status.json
+if [ -f /var/www/html/server.py ]; then
+    su - gpuser -c "python3 /var/www/html/server.py > /tmp/gp-logs/web.log 2>&1 &"
+else
+    echo "WARNING: server.py not found! Did you rebuild?"
+fi
 
+# 3. Start VPN Service
 echo "Starting GlobalProtect Service..."
 su - gpuser -c "xvfb-run -a /usr/bin/gpservice &"
 sleep 1
 
-# Stream logs
+# Stream logs to Docker stdout
 tail -f "$LOG_FILE" &
 
 # --- STATE: IDLE ---
+# This updates status.json so index.html shows the "Connect" button
 write_state "idle" "" ""
 echo "State: IDLE. Waiting for user..."
 
-# Wait for "Connect" signal from Python
+# 4. WAIT FOR USER SIGNAL
+# This blocks until you click "Connect"
 read _ < /tmp/gp-control
 
 # --- STATE: CONNECTING ---
+# Updates UI to show spinner
 write_state "connecting" "" ""
 echo "State: CONNECTING..."
 
-# Start Connection Loop
+# 5. Connection Monitor Loop
 su - gpuser -c "
     exec 3<> /tmp/gp-stdin
     VPN_PORTAL=\"$VPN_PORTAL\"
@@ -81,8 +106,7 @@ su - gpuser -c "
             # 1. CHECK CONNECTED
             if grep -q \"Connected\" \"$LOG_FILE\"; then
                 # --- STATE: CONNECTED ---
-                # We use a python one-liner to call the write_state logic purely via file overwrite
-                # simpler to just overwrite the file here manually since we are in a sub-shell
+                # Manual write inside subshell
                 cat <<JSON > $STATUS_FILE.tmp
 { \"state\": \"connected\", \"log\": \"VPN Connected Successfully\" }
 JSON
@@ -92,7 +116,7 @@ JSON
             elif grep -qE \"https?://.*/.*\" \"$LOG_FILE\"; then
                  LOCAL_URL=\$(grep -oE \"https?://[^ ]+\" \"$LOG_FILE\" | tail -1)
 
-                 # Resolve URL
+                 # Resolve URL (Bypass Proxy)
                  REAL_URL=\$(export http_proxy=; export https_proxy=; python3 -c \"
 import urllib.request, sys
 try:
@@ -107,6 +131,7 @@ except: print('')\" 2>/dev/null)
                  fi
 
                  # --- STATE: AUTH ---
+                 # Manual write inside subshell
                  cat <<JSON > $STATUS_FILE.tmp
 {
   \"state\": \"auth\",
