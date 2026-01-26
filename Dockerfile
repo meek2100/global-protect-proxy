@@ -3,11 +3,13 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # 1. Install runtime dependencies
-#    - dbus-x11: ADDS 'dbus-launch' to fix the "No such file" errors
-#    - xvfb: Virtual display
+#    - curl: REQUIRED for start.sh to resolve the SSO URL (Fixes "command not found")
+#    - dbus-x11: Fixes "No such file" errors for D-Bus
+#    - xvfb: Virtual display for the GUI
 #    - vpnc-scripts & gnome-keyring: GlobalProtect dependencies
 RUN apt-get update && apt-get install -y \
     wget \
+    curl \
     ca-certificates \
     microsocks \
     python3 \
@@ -33,7 +35,7 @@ RUN wget -q https://github.com/yuezk/GlobalProtect-openconnect/releases/download
 # 3. Create a non-root user 'gpuser'
 RUN useradd -m -s /bin/bash gpuser
 
-# 4. Generate Machine ID for D-Bus (Fixes "dbus-launch" issues)
+# 4. Generate Machine ID for D-Bus
 RUN mkdir -p /var/lib/dbus && dbus-uuidgen > /var/lib/dbus/machine-id
 
 # 5. Grant Network Capabilities
@@ -43,7 +45,7 @@ RUN setcap 'cap_net_admin+ep' /usr/bin/gpservice
 RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \
     chown -R gpuser:gpuser /var/www/html /tmp/gp-logs /run/dbus
 
-# 7. Copy Server Script (NEW)
+# 7. Copy Server Script
 COPY server.py /var/www/html/server.py
 
 # 8. Setup start script

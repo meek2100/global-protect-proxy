@@ -10,7 +10,6 @@ FIFO_PATH = "/tmp/gp-stdin"
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        # redirect root to index.html
         if self.path == "/":
             self.path = "/index.html"
         return http.server.SimpleHTTPRequestHandler.do_GET(self)
@@ -24,12 +23,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
                 if "callback_url" in parsed_data:
                     callback_value = parsed_data["callback_url"][0].strip()
-                    # Print to stderr so it shows in docker logs
                     print(f"Received Callback: {callback_value}", file=sys.stderr)
 
                     # Write to the Named Pipe
-                    # We open in 'w' mode. Since start.sh keeps this pipe open
-                    # with a file descriptor, this write happens immediately.
                     with open(FIFO_PATH, "w") as fifo:
                         fifo.write(callback_value + "\n")
                         fifo.flush()
@@ -47,7 +43,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_error(500, f"Server Error: {e}")
 
 
-# Serve from the web directory
 os.chdir("/var/www/html")
 socketserver.TCPServer.allow_reuse_address = True
 with socketserver.TCPServer(("", PORT), Handler) as httpd:
