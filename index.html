@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GlobalProtect VPN</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f6f8;
+            display: flex;
+            justify-content: center;
+            padding-top: 50px;
+            color: #333;
+        }
+
+        .card {
+            background: white;
+            width: 100%;
+            max-width: 500px;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        h1 {
+            margin-top: 0;
+            font-size: 24px;
+            color: #2c3e50;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+
+        .status-idle {
+            background: #e0e0e0;
+            color: #555;
+        }
+
+        .status-connecting {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-auth {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-connected {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            transition: background 0.2s;
+            width: 100%;
+            box-sizing: border-box;
+            margin: 10px 0;
+        }
+
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+
+        .btn-success {
+            background-color: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background-color: #218838;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            box-sizing: border-box;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        #debug-box {
+            margin-top: 20px;
+            text-align: left;
+            background: #2d2d2d;
+            color: #ccc;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            display: none;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="card">
+        <h1>GlobalProtect VPN</h1>
+        <div id="status-badge" class="status-badge status-idle">Loading...</div>
+
+        <div id="view-idle" class="hidden">
+            <p>VPN service is ready.</p>
+            <form action="/connect" method="POST">
+                <button type="submit" class="btn btn-primary">Connect to VPN</button>
+            </form>
+        </div>
+
+        <div id="view-connecting" class="hidden">
+            <div class="spinner"></div>
+            <p>Contacting server...</p>
+        </div>
+
+        <div id="view-auth" class="hidden">
+            <p><strong>Step 1:</strong> Log in via SSO</p>
+            <a id="sso-link" href="#" target="_blank" class="btn btn-success">Open Login Page</a>
+
+            <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
+
+            <p><strong>Step 2:</strong> Paste the callback URL here</p>
+            <form action="/submit" method="POST">
+                <input type="text" name="callback_url" placeholder="Paste globalprotectcallback:..." required
+                    autocomplete="off">
+                <button type="submit" class="btn btn-primary">Submit Code</button>
+            </form>
+        </div>
+
+        <div id="view-connected" class="hidden">
+            <p>✅ <strong>Secure Connection Active</strong></p>
+            <p>SOCKS5 Proxy: <code>localhost:1080</code></p>
+        </div>
+
+        <div id="debug-box"></div>
+    </div>
+
+    <script>
+        async function updateStatus() {
+            try {
+                const response = await fetch('/status.json?t=' + Date.now());
+                const data = await response.json();
+
+                // updateBadge
+                const badge = document.getElementById('status-badge');
+                badge.className = `status-badge status-${data.state}`;
+                badge.innerText = data.state.toUpperCase();
+
+                // Hide all views
+                ['idle', 'connecting', 'auth', 'connected'].forEach(id => {
+                    document.getElementById(`view-${id}`).classList.add('hidden');
+                });
+
+                // Show current view
+                const view = document.getElementById(`view-${data.state}`);
+                if (view) view.classList.remove('hidden');
+
+                // Specific logic
+                if (data.state === 'auth') {
+                    const link = document.getElementById('sso-link');
+                    link.href = data.url;
+                    link.innerText = data.link_text || "Open Login Page";
+                }
+
+                // Debug Log
+                const debug = document.getElementById('debug-box');
+                if (data.log) {
+                    debug.style.display = 'block';
+                    debug.innerText = data.log;
+                } else {
+                    debug.style.display = 'none';
+                }
+
+            } catch (e) {
+                console.error("Poll failed", e);
+            }
+        }
+
+        // Poll every 1 second
+        setInterval(updateStatus, 1000);
+        updateStatus();
+    </script>
+
+</body>
+
+</html>

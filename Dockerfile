@@ -41,17 +41,17 @@ RUN mkdir -p /var/lib/dbus && dbus-uuidgen > /var/lib/dbus/machine-id
 # 5. Grant Network Capabilities
 RUN setcap 'cap_net_admin+ep' /usr/bin/gpservice
 
-# 6. Setup directories and permissions
+# 6. Setup directories
 RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \
     chown -R gpuser:gpuser /var/www/html /tmp/gp-logs /run/dbus
 
-# 7. Copy Server Script
+# 7. Copy Web Files (NEW)
 COPY server.py /var/www/html/server.py
+COPY index.html /var/www/html/index.html
 
 # 8. Setup start script
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
 EXPOSE 1080 8001
-
 ENTRYPOINT ["/start.sh"]
