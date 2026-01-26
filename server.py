@@ -6,6 +6,7 @@ import sys
 
 PORT = 8001
 FIFO_PATH = "/tmp/gp-stdin"
+CONTROL_PATH = "/tmp/gp-control"  # <--- NEW: Control Pipe
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -15,6 +16,27 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return http.server.SimpleHTTPRequestHandler.do_GET(self)
 
     def do_POST(self):
+        # --- NEW: Handle "Connect" Button ---
+        if self.path == "/connect":
+            try:
+                print("Received Start Signal", file=sys.stderr)
+                # Write to the control pipe to unblock start.sh
+                with open(CONTROL_PATH, "w") as f:
+                    f.write("START\n")
+
+                # Redirect back to home (which will now show the loading status)
+                self.send_response(200)
+                self.send_header("Content-type", "text/html")
+                self.end_headers()
+                self.wfile.write(
+                    b"<html><head><meta http-equiv='refresh' content='0;url=/'></head><body>Starting...</body></html>"
+                )
+            except Exception as e:
+                print(f"Error starting: {e}", file=sys.stderr)
+                self.send_error(500, f"Error: {e}")
+            return
+        # ------------------------------------
+
         if self.path == "/submit":
             try:
                 content_length = int(self.headers["Content-Length"])
