@@ -25,7 +25,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     callback_value = parsed_data["callback_url"][0].strip()
                     print(f"Received Callback: {callback_value}", file=sys.stderr)
 
-                    # Write to the Named Pipe
                     with open(FIFO_PATH, "w") as fifo:
                         fifo.write(callback_value + "\n")
                         fifo.flush()
@@ -34,7 +33,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     self.send_header("Content-type", "text/html")
                     self.end_headers()
                     self.wfile.write(
-                        b"<html><head><meta http-equiv='refresh' content='2;url=/'></head><body style='font-family:sans-serif;text-align:center;padding:50px;background:#e6fffa;'><h1>Code Sent!</h1><p>Connecting...</p></body></html>"
+                        b"<html><head><meta http-equiv='refresh' content='2;url=/'></head><body style='font-family:sans-serif;text-align:center;padding:50px;background:#e6fffa;'><h1>Code Sent</h1><p>Connecting...</p></body></html>"
                     )
                 else:
                     self.send_error(400, "No callback_url found")

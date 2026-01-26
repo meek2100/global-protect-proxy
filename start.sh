@@ -40,7 +40,6 @@ tail -f /tmp/gp-logs/vpn.log &
 # 5. Connection Monitor Loop
 echo "Starting Connection Monitor..."
 su - gpuser -c "
-    # CRITICAL: Open the pipe for Read+Write (fd 3)
     exec 3<> /tmp/gp-stdin
 
     LOG_FILE=\"/tmp/gp-logs/vpn.log\"
@@ -61,16 +60,15 @@ su - gpuser -c "
                 cat <<HTML > /var/www/html/index.html
 <html><head><meta http-equiv=\"refresh\" content=\"60\"></head>
 <body style=\"background:#e6fffa;font-family:sans-serif;text-align:center;padding:50px;\">
-<h1 style=\"color:green;\">✅ VPN CONNECTED</h1>
+<h1 style=\"color:green;\">VPN CONNECTED</h1>
 <p>Proxy running on port 1080</p>
 <p><small>Refreshes every 60s</small></p>
 </body></html>
 HTML
 
-            # B. Needs Auth (Extract URL)
+            # B. Needs Auth
             elif grep -qE \"https?://.*/.*\" \$LOG_FILE; then
 
-                # Extract LOCAL URL
                 LOCAL_URL=\$(grep -oE \"https?://[^ ]+\" \$LOG_FILE | tail -1)
 
                 # Resolve to PUBLIC URL using curl inside container
@@ -94,7 +92,7 @@ HTML
 </head>
 <body>
     <div class=\"card\">
-        <h2 style=\"color: #d9534f;\">⚠️ Authentication Required</h2>
+        <h2 style=\"color: #d9534f;\">Authentication Required</h2>
 
         <h3>Step 1</h3>
         <a href=\"\$REAL_URL\" target=\"_blank\" class=\"btn-link\">Click to Login (SSO)</a>

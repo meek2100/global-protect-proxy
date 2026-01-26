@@ -9,7 +9,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 #    - vpnc-scripts & gnome-keyring: GlobalProtect dependencies
 RUN apt-get update && apt-get install -y \
     wget \
-    curl \
     ca-certificates \
     microsocks \
     python3 \
@@ -24,6 +23,7 @@ RUN apt-get update && apt-get install -y \
     gnome-keyring \
     xvfb \
     dbus-x11 \
+    curl \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
