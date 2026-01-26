@@ -3,10 +3,9 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # 1. Install runtime dependencies
-#    - xvfb: Creates a virtual display to satisfy the GUI requirement
-#    - vpnc-scripts & gnome-keyring: Required by the GlobalProtect .deb
-#    - libcap2-bin: For setting capabilities (network permissions)
-#    - python3 & microsocks: For dashboard and proxy
+#    - dbus-x11: ADDS 'dbus-launch' to fix the "No such file" errors
+#    - xvfb: Virtual display
+#    - vpnc-scripts & gnome-keyring: GlobalProtect dependencies
 RUN apt-get update && apt-get install -y \
     wget \
     ca-certificates \
@@ -22,6 +21,7 @@ RUN apt-get update && apt-get install -y \
     vpnc-scripts \
     gnome-keyring \
     xvfb \
+    dbus-x11 \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
@@ -33,15 +33,17 @@ RUN wget -q https://github.com/yuezk/GlobalProtect-openconnect/releases/download
 # 3. Create a non-root user 'gpuser'
 RUN useradd -m -s /bin/bash gpuser
 
-# 4. Grant Network Capabilities to the binary
-#    Allows 'gpservice' to manage the VPN interface (tun0) without being root.
+# 4. Generate Machine ID for D-Bus (Fixes "dbus-launch" issues)
+RUN mkdir -p /var/lib/dbus && dbus-uuidgen > /var/lib/dbus/machine-id
+
+# 5. Grant Network Capabilities
 RUN setcap 'cap_net_admin+ep' /usr/bin/gpservice
 
-# 5. Setup directories and permissions
-RUN mkdir -p /var/www/html /tmp/gp-logs && \
-    chown -R gpuser:gpuser /var/www/html /tmp/gp-logs
+# 6. Setup directories and permissions
+RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \
+    chown -R gpuser:gpuser /var/www/html /tmp/gp-logs /run/dbus
 
-# 6. Setup start script
+# 7. Setup start script
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
