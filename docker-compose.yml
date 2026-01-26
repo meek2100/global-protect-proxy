@@ -6,9 +6,20 @@ services:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
-    ports:
-      - "1080:1080" # Proxy
-      - "8001:8001" # Status Dashboard (Changed from 8000)
+    # Ports are NOT mapped when using macvlan (the container has its own IP)
+    # You will access the dashboard at http://<ipv4_address>:8001
     environment:
       - VPN_PORTAL=vpn.yourcompany.com
+    networks:
+      globalprotect_network:
+        ipv4_address: 192.168.1.155
+        mac_address: 02:F5:58:97:8E:88
     restart: unless-stopped
+
+networks:
+  globalprotect_network:
+    driver: macvlan
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+          gateway: 192.168.1.1

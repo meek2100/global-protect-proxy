@@ -5,6 +5,20 @@ set -e
 STATUS_FILE="/var/www/html/status.json"
 LOG_FILE="/tmp/gp-logs/vpn.log"
 
+# --- GATEWAY SETUP (Run as Root) ---
+echo "=== Network Setup ==="
+# Enable IP Forwarding
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+# Configure NAT/Masquerade for Gateway Mode
+# Traffic leaving via tun0 (VPN) should be masqueraded
+iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
+# Allow forwarding between LAN (eth0) and VPN (tun0)
+iptables -A FORWARD -i eth0 -o tun0 -j ACCEPT
+iptables -A FORWARD -i tun0 -o eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+echo "NAT and Forwarding configured."
+
 # --- HELPER: Write JSON State ---
 write_state() {
     STATE="$1"
@@ -15,7 +29,7 @@ write_state() {
     SAFE_URL=$(echo "$URL" | sed 's/"/\\"/g')
     SAFE_TEXT=$(echo "$TEXT" | sed 's/"/\\"/g')
 
-    # Grab last 20 lines (expanded from 5) for better debugging
+    # Grab last 20 lines for better debugging
     LOG_CONTENT=$(tail -n 20 "$LOG_FILE" 2>/dev/null | awk '{printf "%s\\n", $0}' | sed 's/"/\\"/g')
 
     cat <<JSON > "$STATUS_FILE.tmp"
@@ -85,16 +99,25 @@ write_state "connecting" "" ""
 echo "State: CONNECTING..."
 
 # 3. Connection Loop
+# We export the VPN_PORTAL variable so the inner shell can see it
+export VPN_PORTAL
+
 su - gpuser -c "
     exec 3<> /tmp/gp-stdin
-    VPN_PORTAL=\"$VPN_PORTAL\"
 
-    # --- CRITICAL FIX: Clear log on new run to prevent stale URL detection ---
+    # CRITICAL FIX: Clear log on new run to prevent stale URL detection
     > \"$LOG_FILE\"
 
     while true; do
         echo \"Attempting connection...\" >> \"$LOG_FILE\"
-        gpclient --fix-openssl connect \"\$VPN_PORTAL\" --browser remote <&3 >> \"$LOG_FILE\" 2>&1 &
+
+        # --- TTY FIX: Use 'script' to fake a TTY ---
+        # We construct the command carefully to avoid quoting issues
+        CMD=\"gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote\"
+
+        # script -q (quiet) -c (command) /dev/null (output sink)
+        # We pipe the FIFO (FD 3) into script's stdin, which forwards to the PTY
+        script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1 &
         CLIENT_PID=\$!
 
         while kill -0 \$CLIENT_PID 2>/dev/null; do
@@ -110,7 +133,6 @@ JSON
                  LOCAL_URL=\$(grep -oE \"https?://[^ ]+\" \"$LOG_FILE\" | tail -1)
 
                  # --- VERBOSE RESOLUTION SCRIPT ---
-                 # We capture stderr to log file so you can see WHY it fails
                  REAL_URL=\$(export http_proxy=; export https_proxy=; python3 -c \"
 import urllib.request, sys
 try:
@@ -132,9 +154,6 @@ except Exception as e:
                      LINK_TEXT=\"Open Login Page (SSO)\"
                  fi
 
-                 # --- STATE: AUTH ---
-                 # Note: We append the debug info into the log field automatically via write_state logic
-                 # but here we manually construct it to ensure atomicity
                  LOG_CONTENT=\$(tail -n 20 \"$LOG_FILE\" | awk '{printf \"%s\\\\n\", \$0}' | sed 's/\"/\\\\\"/g')
 
                  cat <<JSON > $STATUS_FILE.tmp
