@@ -66,23 +66,23 @@ su - gpuser -c "
 </body></html>
 HTML
 
-            # B. Needs Auth (Extract URL)
+            # B. Needs Auth (Resolve URL)
             elif grep -qE \"https?://.*/.*\" \$LOG_FILE; then
 
-                # Extract LOCAL URL (The 172.x.x.x link)
+                # Extract LOCAL URL (e.g. http://172.x.x.x...)
                 LOCAL_URL=\$(grep -oE \"https?://[^ ]+\" \$LOG_FILE | tail -1)
 
-                # Resolve to PUBLIC URL using curl's internal redirect parser
-                # This hits the internal server ONCE (which kills it) and grabs the redirect header.
-                REAL_URL=\$(curl -s -o /dev/null -w \"%{redirect_url}\" \"\$LOCAL_URL\")
+                # --- FIX: Use Python to Resolve Redirect ---
+                # This is more reliable than curl. It hits the local link, follows the 302 redirect,
+                # and prints the final public SSO URL.
+                REAL_URL=\$(python3 -c \"import urllib.request; print(urllib.request.urlopen('\$LOCAL_URL').geturl())\" 2>/dev/null)
 
-                # Fallback: If extraction fails, warn the user.
+                # Fallback if Python fails
                 if [ -z \"\$REAL_URL\" ]; then
-                     # If curl failed, the link is likely already dead or parsing failed.
-                     # We display a helpful error instead of the broken 172 link.
-                     LINK_HTML=\"<p style='color:red'><strong>Error:</strong> Could not auto-resolve SSO link.</p><p>Please check container logs for the 'Location' header.</p>\"
+                     REAL_URL=\"\$LOCAL_URL\"
+                     LINK_TEXT=\"Click to Login (May fail if internal IP)\"
                 else
-                     LINK_HTML=\"<a href='\$REAL_URL' target='_blank' class='btn-link'>Click to Login (SSO)</a>\"
+                     LINK_TEXT=\"Click to Login (SSO)\"
                 fi
 
                 # Update Dashboard
@@ -105,7 +105,7 @@ HTML
         <h2 style=\"color: #d9534f;\">Authentication Required</h2>
 
         <h3>Step 1</h3>
-        \$LINK_HTML
+        <a href=\"\$REAL_URL\" target=\"_blank\" class=\"btn-link\">\$LINK_TEXT</a>
 
         <h3>Step 2</h3>
         <p>After logging in, copy the full URL (starting with <code>globalprotectcallback:</code>) and paste it here:</p>
