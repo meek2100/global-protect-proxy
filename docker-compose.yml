@@ -4,10 +4,10 @@ services:
     container_name: globalprotect-vpn
     cap_add:
       - NET_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
     devices:
       - /dev/net/tun:/dev/net/tun
-    # Ports are NOT mapped when using macvlan (the container has its own IP)
-    # You will access the dashboard at http://<ipv4_address>:8001
     environment:
       - VPN_PORTAL=vpn.yourcompany.com
     networks:

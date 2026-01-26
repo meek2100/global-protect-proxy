@@ -7,8 +7,11 @@ LOG_FILE="/tmp/gp-logs/vpn.log"
 
 # --- GATEWAY SETUP (Run as Root) ---
 echo "=== Network Setup ==="
+
 # Enable IP Forwarding
-echo 1 > /proc/sys/net/ipv4/ip_forward
+# We use '|| true' so this doesn't crash the script if /proc is read-only.
+# (We rely on 'sysctls' in docker-compose.yml to set this for us).
+echo 1 > /proc/sys/net/ipv4/ip_forward || echo "WARNING: Could not write to ip_forward (likely read-only). Ensure 'sysctls' is set in docker-compose."
 
 # Configure NAT/Masquerade for Gateway Mode
 iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
@@ -25,7 +28,6 @@ write_state() {
 
     SAFE_URL=$(echo "$URL" | sed 's/"/\\"/g')
     SAFE_TEXT=$(echo "$TEXT" | sed 's/"/\\"/g')
-    # Grab last 20 lines for debugging
     LOG_CONTENT=$(tail -n 20 "$LOG_FILE" 2>/dev/null | awk '{printf "%s\\n", $0}' | sed 's/"/\\"/g')
 
     cat <<JSON > "$STATUS_FILE.tmp"
@@ -73,7 +75,6 @@ else
 fi
 
 echo "Starting GlobalProtect Service (Headless)..."
-# Note: No xvfb-run needed for headless build
 su - gpuser -c "/usr/bin/gpservice &"
 sleep 1
 
@@ -102,7 +103,6 @@ su - gpuser -c "
         echo \"Attempting connection to \$VPN_PORTAL...\" >> \"$LOG_FILE\"
 
         # --- TTY FIX & Headless Browser ---
-        # --browser remote: Generates a URL for us to scrape
         CMD=\"gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote\"
 
         # Use script to fake a TTY, pipe stdin from our FIFO
@@ -119,10 +119,9 @@ JSON
 
             # 2. CHECK AUTH REQUIRED (Extract SSO URL)
             elif grep -qE \"https?://.*/.*\" \"$LOG_FILE\"; then
-                 # Grab the last http link found in the log
                  LOCAL_URL=\$(grep -oE \"https?://[^ ]+\" \"$LOG_FILE\" | tail -1)
 
-                 # Attempt to resolve localhost redirects if possible, or just pass it through
+                 # Attempt to resolve localhost redirects
                  REAL_URL=\$(export http_proxy=; export https_proxy=; python3 -c \"
 import urllib.request, sys
 try:
