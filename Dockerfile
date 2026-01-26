@@ -2,56 +2,51 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 1. Install runtime dependencies
-#    - curl: REQUIRED for start.sh to resolve the SSO URL (Fixes "command not found")
-#    - dbus-x11: Fixes "No such file" errors for D-Bus
-#    - xvfb: Virtual display for the GUI
-#    - vpnc-scripts & gnome-keyring: GlobalProtect dependencies
+# 1. Install Dependencies (Firefox, VNC, Window Manager, Audio)
 RUN apt-get update && apt-get install -y \
-    wget \
-    ca-certificates \
-    microsocks \
-    python3 \
-    iptables \
-    iproute2 \
-    libcap2-bin \
-    libgtk-3-0 \
-    libwebkit2gtk-4.1-0 \
-    libayatana-appindicator3-1 \
-    librsvg2-common \
-    vpnc-scripts \
-    gnome-keyring \
-    xvfb \
-    dbus-x11 \
-    curl \
+    wget curl ca-certificates \
+    microsocks python3 python3-numpy \
+    iptables iproute2 \
+    libcap2-bin vpnc-scripts gnome-keyring \
+    xvfb dbus-x11 \
+    firefox openbox x11vnc \
+    util-linux \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
-# 2. Download and Install the Pre-built .deb
+# 2. Install noVNC (HTML5 VNC Client)
+RUN mkdir -p /opt/novnc/utils/websockify && \
+    wget -qO- https://github.com/novnc/noVNC/archive/v1.4.0.tar.gz | tar xz --strip 1 -C /opt/novnc && \
+    wget -qO- https://github.com/novnc/websockify/archive/v0.11.0.tar.gz | tar xz --strip 1 -C /opt/novnc/utils/websockify
+
+# 3. Install GlobalProtect
 RUN wget -q https://github.com/yuezk/GlobalProtect-openconnect/releases/download/v2.5.1/globalprotect-openconnect_2.5.1-1_amd64.deb -O /tmp/gp.deb && \
     apt-get install -y /tmp/gp.deb && \
     rm /tmp/gp.deb
 
-# 3. Create a non-root user 'gpuser'
+# 4. Setup User & Permissions
 RUN useradd -m -s /bin/bash gpuser
-
-# 4. Generate Machine ID for D-Bus
 RUN mkdir -p /var/lib/dbus && dbus-uuidgen > /var/lib/dbus/machine-id
-
-# 5. Grant Network Capabilities
 RUN setcap 'cap_net_admin+ep' /usr/bin/gpservice
 
-# 6. Setup directories
+# 5. Setup Protocol Handler (The Magic)
+# This tells the OS: "If you see globalprotectcallback://, run gp-handler.sh"
+COPY gp-handler.sh /usr/local/bin/gp-handler.sh
+RUN chmod +x /usr/local/bin/gp-handler.sh
+RUN mkdir -p /usr/share/applications
+RUN echo "[Desktop Entry]\nName=GlobalProtect Handler\nExec=/usr/local/bin/gp-handler.sh %u\nType=Application\nTerminal=false\nMimeType=x-scheme-handler/globalprotectcallback;" > /usr/share/applications/gp-handler.desktop
+RUN update-desktop-database /usr/share/applications
+
+# 6. Copy Files
 RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \
     chown -R gpuser:gpuser /var/www/html /tmp/gp-logs /run/dbus
 
-# 7. Copy Web Files (NEW)
 COPY server.py /var/www/html/server.py
 COPY index.html /var/www/html/index.html
-
-# 8. Setup start script
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-EXPOSE 1080 8001
+# 8001 for UI, 8002 for VNC Websocket
+EXPOSE 1080 8001 8002
+
 ENTRYPOINT ["/start.sh"]

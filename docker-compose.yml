@@ -8,7 +8,8 @@ services:
       - /dev/net/tun:/dev/net/tun
     ports:
       - "1080:1080" # Proxy
-      - "8001:8001" # Status Dashboard (Changed from 8000)
+      - "8001:8001" # Status Dashboard
+      - "8002:8002" # VNC Port
     environment:
       - VPN_PORTAL=vpn.yourcompany.com
     restart: unless-stopped

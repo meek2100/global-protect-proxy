@@ -4,26 +4,15 @@ set -e
 # --- CONFIG ---
 STATUS_FILE="/var/www/html/status.json"
 LOG_FILE="/tmp/gp-logs/vpn.log"
+DISPLAY=:1
+export DISPLAY
 
-# --- HELPER: Write JSON State ---
+# --- HELPER: Write State ---
 write_state() {
-    STATE="$1"
-    URL="$2"
-    TEXT="$3"
-
-    # Escape quotes for JSON safely
-    SAFE_URL=$(echo "$URL" | sed 's/"/\\"/g')
-    SAFE_TEXT=$(echo "$TEXT" | sed 's/"/\\"/g')
-
-    # Grab last 20 lines (expanded from 5) for better debugging
-    LOG_CONTENT=$(tail -n 20 "$LOG_FILE" 2>/dev/null | awk '{printf "%s\\n", $0}' | sed 's/"/\\"/g')
-
     cat <<JSON > "$STATUS_FILE.tmp"
 {
-  "state": "$STATE",
-  "url": "$SAFE_URL",
-  "link_text": "$SAFE_TEXT",
-  "log": "$LOG_CONTENT"
+  "state": "$1",
+  "log": "$(tail -n 10 $LOG_FILE | sed 's/"/\\"/g' | awk '{printf "%s\\n", $0}')"
 }
 JSON
     mv "$STATUS_FILE.tmp" "$STATUS_FILE"
@@ -31,126 +20,91 @@ JSON
 
 echo "=== Container Started ==="
 
-# --- DEBUG: Check Disk Space ---
-echo "Checking disk space..."
-df -h /var/run || echo "Cannot check disk space"
-
-# --- SETUP: Permissions & Pipes ---
+# 1. Setup Files & Perms
 rm -f /var/run/gpservice.lock /tmp/gp-stdin /tmp/gp-control
-
-# Create Lock File
-if ! touch /var/run/gpservice.lock; then
-    echo "CRITICAL ERROR: Could not create lock file."
-    exit 1
-fi
-chown gpuser:gpuser /var/run/gpservice.lock
-
-# Create Pipes
 mkfifo /tmp/gp-stdin /tmp/gp-control
-chown gpuser:gpuser /tmp/gp-stdin /tmp/gp-control
+touch /var/run/gpservice.lock "$LOG_FILE"
+chown gpuser:gpuser /var/run/gpservice.lock /tmp/gp-stdin /tmp/gp-control "$LOG_FILE"
 chmod 666 /tmp/gp-stdin /tmp/gp-control
 
-# Logs
-mkdir -p /tmp/gp-logs
-touch "$LOG_FILE"
-chown -R gpuser:gpuser /tmp/gp-logs /var/www/html
-
-# 1. Start Services
-echo "Starting Microsocks..."
-su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
-
-echo "Starting Web Interface..."
-if [ -f /var/www/html/server.py ]; then
-    su - gpuser -c "python3 /var/www/html/server.py > /tmp/gp-logs/web.log 2>&1 &"
-else
-    echo "WARNING: server.py missing!"
-fi
-
-echo "Starting GlobalProtect Service..."
-su - gpuser -c "xvfb-run -a /usr/bin/gpservice &"
+# 2. Start X11 / Window Manager / VNC
+echo "Starting Display Server..."
+Xvfb $DISPLAY -screen 0 1280x800x24 &
 sleep 1
+openbox &  # Minimal window manager for the browser
 
-# Stream logs
-tail -f "$LOG_FILE" &
+echo "Starting VNC Server..."
+# -forever: keep listening
+# -shared: allow multiple viewers
+x11vnc -display $DISPLAY -forever -shared -nopw -quiet -bg
 
-# --- STATE: IDLE ---
-write_state "idle" "" ""
-echo "State: IDLE. Waiting for user..."
+echo "Starting noVNC Bridge..."
+# Proxy localhost:5900 (VNC) to 0.0.0.0:8002 (Websocket)
+/opt/novnc/utils/websockify/run 8002 localhost:5900 --web /opt/novnc &
 
-# 2. WAIT FOR USER SIGNAL
+# 3. Start VPN Services
+echo "Starting VPN Services..."
+su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
+su - gpuser -c "python3 /var/www/html/server.py > /tmp/gp-logs/web.log 2>&1 &"
+su - gpuser -c "gpservice &" # No xvfb-run needed, DISPLAY is exported globally
+sleep 2
+
+write_state "idle"
+
+# 4. Main Logic Loop
+echo "Ready. Waiting for user..."
 read _ < /tmp/gp-control
 
-# --- STATE: CONNECTING ---
-write_state "connecting" "" ""
-echo "State: CONNECTING..."
+write_state "connecting"
 
-# 3. Connection Loop
 su - gpuser -c "
     exec 3<> /tmp/gp-stdin
     VPN_PORTAL=\"$VPN_PORTAL\"
-
-    # --- CRITICAL FIX: Clear log on new run to prevent stale URL detection ---
     > \"$LOG_FILE\"
 
-    while true; do
-        echo \"Attempting connection...\" >> \"$LOG_FILE\"
-        gpclient --fix-openssl connect \"\$VPN_PORTAL\" --browser remote <&3 >> \"$LOG_FILE\" 2>&1 &
-        CLIENT_PID=\$!
+    # 1. Start VPN Client (Background)
+    #    We use 'script' to fake TTY
+    script -q -c \"gpclient --fix-openssl connect \$VPN_PORTAL --browser remote\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1 &
+    CLIENT_PID=\$!
 
-        while kill -0 \$CLIENT_PID 2>/dev/null; do
-            # 1. CHECK CONNECTED
-            if grep -q \"Connected\" \"$LOG_FILE\"; then
-                cat <<JSON > $STATUS_FILE.tmp
-{ \"state\": \"connected\", \"log\": \"VPN Connected Successfully\" }
-JSON
-                mv $STATUS_FILE.tmp $STATUS_FILE
+    # 2. Monitor Log for SSO URL
+    BROWSER_LAUNCHED=0
 
-            # 2. CHECK AUTH REQUIRED
-            elif grep -qE \"https?://.*/.*\" \"$LOG_FILE\"; then
-                 LOCAL_URL=\$(grep -oE \"https?://[^ ]+\" \"$LOG_FILE\" | tail -1)
+    while kill -0 \$CLIENT_PID 2>/dev/null; do
 
-                 # --- VERBOSE RESOLUTION SCRIPT ---
-                 # We capture stderr to log file so you can see WHY it fails
-                 REAL_URL=\$(export http_proxy=; export https_proxy=; python3 -c \"
-import urllib.request, sys
-try:
-    url = '\$LOCAL_URL'
-    print(f'DEBUG: Resolving {url}...', file=sys.stderr)
-    req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=5) as r:
-        final_url = r.geturl()
-        print(f'DEBUG: Resolved to {final_url}', file=sys.stderr)
-        print(final_url)
-except Exception as e:
-    print(f'DEBUG_ERROR: {e}', file=sys.stderr)
-\" 2>> \"$LOG_FILE\")
+        # Check for URL to open
+        if [ \$BROWSER_LAUNCHED -eq 0 ] && grep -q \"https://\" \"$LOG_FILE\"; then
+             # Extract the AUTH URL
+             AUTH_URL=\$(grep -o \"https://[^ ]*\" \"$LOG_FILE\" | head -1)
+             echo \"Opening Browser to: \$AUTH_URL\" >> \"$LOG_FILE\"
 
-                 if [ -z \"\$REAL_URL\" ]; then
-                     REAL_URL=\"\$LOCAL_URL\"
-                     LINK_TEXT=\"Internal IP (May Fail)\"
-                 else
-                     LINK_TEXT=\"Open Login Page (SSO)\"
-                 fi
+             # LAUNCH FIREFOX INSIDE THE CONTAINER
+             # It will appear on the VNC screen
+             firefox --new-window \"\$AUTH_URL\" &
+             BROWSER_LAUNCHED=1
 
-                 # --- STATE: AUTH ---
-                 # Note: We append the debug info into the log field automatically via write_state logic
-                 # but here we manually construct it to ensure atomicity
-                 LOG_CONTENT=\$(tail -n 20 \"$LOG_FILE\" | awk '{printf \"%s\\\\n\", \$0}' | sed 's/\"/\\\\\"/g')
+             # Notify UI we are in Auth mode
+             # (We invoke write_state via a temp file hack or similar,
+             # but here we rely on the loop updating logs)
+        fi
 
-                 cat <<JSON > $STATUS_FILE.tmp
-{
-  \"state\": \"auth\",
-  \"url\": \"\$REAL_URL\",
-  \"link_text\": \"\$LINK_TEXT\",
-  \"log\": \"\$LOG_CONTENT\"
-}
-JSON
-                 mv $STATUS_FILE.tmp $STATUS_FILE
-            fi
-            sleep 1
-        done
-        sleep 5
+        # Check for Success
+        if grep -q \"Connected\" \"$LOG_FILE\"; then
+             # Close Firefox to save RAM
+             pkill firefox
+             echo \"VPN CONNECTED SUCCESSFULLY\" >> \"$LOG_FILE\"
+        fi
+
+        sleep 1
     done
 " &
 
-wait
+# Monitoring Loop to update JSON status
+while true; do
+    if grep -q "Connected" "$LOG_FILE"; then STATE="connected";
+    elif grep -q "https://" "$LOG_FILE"; then STATE="auth";
+    else STATE="connecting"; fi
+
+    write_state "$STATE"
+    sleep 2
+done
