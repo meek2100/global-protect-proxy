@@ -66,14 +66,24 @@ su - gpuser -c "
 </body></html>
 HTML
 
-            # B. Needs Auth
+            # B. Needs Auth (Extract URL)
             elif grep -qE \"https?://.*/.*\" \$LOG_FILE; then
 
+                # Extract LOCAL URL (The 172.x.x.x link)
                 LOCAL_URL=\$(grep -oE \"https?://[^ ]+\" \$LOG_FILE | tail -1)
 
-                # Resolve to PUBLIC URL using curl inside container
-                REAL_URL=\$(curl -s -I \"\$LOCAL_URL\" | grep -i \"Location:\" | awk '{print \$2}' | tr -d '\r')
-                if [ -z \"\$REAL_URL\" ]; then REAL_URL=\"\$LOCAL_URL\"; fi
+                # Resolve to PUBLIC URL using curl's internal redirect parser
+                # This hits the internal server ONCE (which kills it) and grabs the redirect header.
+                REAL_URL=\$(curl -s -o /dev/null -w \"%{redirect_url}\" \"\$LOCAL_URL\")
+
+                # Fallback: If extraction fails, warn the user.
+                if [ -z \"\$REAL_URL\" ]; then
+                     # If curl failed, the link is likely already dead or parsing failed.
+                     # We display a helpful error instead of the broken 172 link.
+                     LINK_HTML=\"<p style='color:red'><strong>Error:</strong> Could not auto-resolve SSO link.</p><p>Please check container logs for the 'Location' header.</p>\"
+                else
+                     LINK_HTML=\"<a href='\$REAL_URL' target='_blank' class='btn-link'>Click to Login (SSO)</a>\"
+                fi
 
                 # Update Dashboard
                 cat <<HTML > /var/www/html/index.html
@@ -95,7 +105,7 @@ HTML
         <h2 style=\"color: #d9534f;\">Authentication Required</h2>
 
         <h3>Step 1</h3>
-        <a href=\"\$REAL_URL\" target=\"_blank\" class=\"btn-link\">Click to Login (SSO)</a>
+        \$LINK_HTML
 
         <h3>Step 2</h3>
         <p>After logging in, copy the full URL (starting with <code>globalprotectcallback:</code>) and paste it here:</p>
