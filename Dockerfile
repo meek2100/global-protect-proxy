@@ -3,10 +3,10 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # 1. Install runtime dependencies
-#    - vpnc-scripts & gnome-keyring: Required dependencies that caused your previous error
+#    - xvfb: Creates a virtual display to satisfy the GUI requirement
+#    - vpnc-scripts & gnome-keyring: Required by the GlobalProtect .deb
 #    - libcap2-bin: For setting capabilities (network permissions)
-#    - python3: For the status dashboard
-#    - microsocks: For the proxy
+#    - python3 & microsocks: For dashboard and proxy
 RUN apt-get update && apt-get install -y \
     wget \
     ca-certificates \
@@ -21,12 +21,11 @@ RUN apt-get update && apt-get install -y \
     librsvg2-common \
     vpnc-scripts \
     gnome-keyring \
+    xvfb \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
 # 2. Download and Install the Pre-built .deb
-#    We use '|| true' on dpkg to allow it to fail on dependencies, then 'apt-get install -f' fixes them.
-#    However, installing dependencies first (above) is cleaner.
 RUN wget -q https://github.com/yuezk/GlobalProtect-openconnect/releases/download/v2.5.1/globalprotect-openconnect_2.5.1-1_amd64.deb -O /tmp/gp.deb && \
     apt-get install -y /tmp/gp.deb && \
     rm /tmp/gp.deb
@@ -35,7 +34,7 @@ RUN wget -q https://github.com/yuezk/GlobalProtect-openconnect/releases/download
 RUN useradd -m -s /bin/bash gpuser
 
 # 4. Grant Network Capabilities to the binary
-#    This allows 'gpservice' to manage the VPN interface (tun0) without running as root.
+#    Allows 'gpservice' to manage the VPN interface (tun0) without being root.
 RUN setcap 'cap_net_admin+ep' /usr/bin/gpservice
 
 # 5. Setup directories and permissions
