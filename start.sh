@@ -4,11 +4,10 @@ set -e
 echo "=== Container Started ==="
 
 # --- FIX: Permissions for Lock File ---
-# 1. Clean up any stale lock file from previous runs
+# 1. Clean up any stale lock file
 rm -f /var/run/gpservice.lock
 
 # 2. Pre-create the lock file and give ownership to gpuser
-#    The app expects this file at this specific path.
 touch /var/run/gpservice.lock
 chown gpuser:gpuser /var/run/gpservice.lock
 # --------------------------------------
@@ -30,8 +29,6 @@ echo "Starting Dashboard on 8001..."
 su - gpuser -c "python3 -m http.server 8001 --directory /var/www/html > /dev/null 2>&1 &"
 
 # 3. Start VPN Service (HEADLESS FIX)
-#    We use 'xvfb-run -a' to launch the service with a virtual display.
-#    This prevents the "Failed to initialize GTK" panic.
 echo "Starting GlobalProtect Service..."
 su - gpuser -c "xvfb-run -a /usr/bin/gpservice &"
 
@@ -49,7 +46,8 @@ su - gpuser -c "
 
     while true; do
         # Connect
-        gpclient connect \"\$VPN_PORTAL\" --browser remote --fix-openssl > \"\$LOG_FILE\" 2>&1 &
+        # REMOVED: --fix-openssl (Not supported in v2.5.1)
+        gpclient connect \"\$VPN_PORTAL\" --browser remote > \"\$LOG_FILE\" 2>&1 &
         CLIENT_PID=\$!
 
         # Monitor loop
