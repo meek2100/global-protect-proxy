@@ -47,7 +47,7 @@ su - gpuser -c "
     while true; do
         # Connect
         # REMOVED: --fix-openssl (Not supported in v2.5.1)
-        gpclient connect \"\$VPN_PORTAL\" --browser remote > \"\$LOG_FILE\" 2>&1 &
+        gpclient --fix-openssl connect \"\$VPN_PORTAL\" --browser remote > \"\$LOG_FILE\" 2>&1 &
         CLIENT_PID=\$!
 
         # Monitor loop
