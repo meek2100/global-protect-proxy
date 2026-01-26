@@ -1,8 +1,7 @@
 # --- Build Stage ---
 FROM rust:bookworm AS builder
 
-# 1. Install EXACT Build Dependencies from README
-#    We include 'libopenconnect-dev' and the 'Tauri dependencies' list provided.
+# 1. Install Build Dependencies
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -31,10 +30,9 @@ WORKDIR /usr/src/app
 # 2. Clone source code (v2.5.1)
 RUN git clone --branch v2.5.1 --recursive https://github.com/yuezk/GlobalProtect-openconnect.git .
 
-
 # 3. Build the application (Headless)
 #    BUILD_GUI=0: Don't build the GUI app
-#    BUILD_FE=0: Don't build the frontend assets (we don't need them for CLI)
+#    BUILD_FE=0: Don't build the frontend assets
 RUN make build BUILD_GUI=0 BUILD_FE=0
 
 
@@ -66,11 +64,13 @@ RUN apt-get update && apt-get install -y \
 # 2. Create non-root user
 RUN useradd -m -s /bin/bash gpuser
 
-# 3. Copy Binaries from Builder
-#    We only copy the CLI tools. 'gpgui-helper' is intentionally omitted.
+# 3. Copy Binaries
+#    Crucial: We MUST copy 'gpgui-helper' even for headless use,
+#    otherwise gpservice crashes on startup version check.
 COPY --from=builder /usr/src/app/target/release/gpclient /usr/bin/
 COPY --from=builder /usr/src/app/target/release/gpservice /usr/bin/
 COPY --from=builder /usr/src/app/target/release/gpauth /usr/bin/
+COPY --from=builder /usr/src/app/target/release/gpgui-helper /usr/bin/
 
 # 4. Grant Network Capabilities
 #    Allows 'gpservice' to manage tun0 without running as full root
