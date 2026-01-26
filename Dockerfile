@@ -44,7 +44,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 #    - vpnc-scripts: Required by OpenConnect for setting DNS/Routes
 #    - ca-certificates: For SSL
 #    - libxml2: Likely required by gpclient
-#    Note: NO libwebkit or libgtk!
+#    - libgnutls30: Required by gpclient
+#    - liblz4-1: Required by gpclient
 RUN apt-get update && apt-get install -y \
     microsocks \
     python3 \
@@ -54,6 +55,8 @@ RUN apt-get update && apt-get install -y \
     vpnc-scripts \
     ca-certificates \
     libxml2 \
+    libgnutls30 \
+    liblz4-1 \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
