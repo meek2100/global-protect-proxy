@@ -68,8 +68,7 @@ def get_vpn_state():
     if os.path.exists(MODE_FILE):
         try:
             with open(MODE_FILE, "r") as f:
-                mode = f.read().strip()
-                if mode == "active":
+                if f.read().strip() == "active":
                     current_state = "connecting"
         except Exception as e:
             logger.error(f"Failed to read mode file: {e}")
@@ -119,7 +118,7 @@ def get_vpn_state():
 
                             # Cleanly extract options
                             gateway_regex = re.compile(
-                                r"^\s*([A-Za-z0-9\-\.]+\s+\([A-Za-z0-9\-\.]+\))"
+                                r"(?:>|\s)*([A-Za-z0-9\-\.]+\s+\([A-Za-z0-9\-\.]+\))"
                             )
                             seen = set()
                             for l in clean_lines:
@@ -147,12 +146,11 @@ def get_vpn_state():
                 # We ONLY check for Auth if we are stuck in 'connecting'.
                 # If we are already in 'input', we have passed the initial auth request.
                 if current_state == "connecting":
-                    is_manual_auth = "Manual Authentication Required" in log_content
-                    auth_server_active = "auth server started" in log_content
-
-                    if is_manual_auth or auth_server_active:
+                    if (
+                        "Manual Authentication Required" in log_content
+                        or "auth server started" in log_content
+                    ):
                         current_state = "auth"
-                        # Extract URL
                         url_pattern = re.compile(r'(https?://[^\s"<>]+)')
                         found_urls = url_pattern.findall(log_content)
                         if found_urls:
@@ -185,7 +183,7 @@ def get_vpn_state():
         "options": sorted(input_options),
         "error": error_msg,
         "log": log_content,
-        "debug": f"Server Decision: {current_state} | Input Options: {len(input_options)}",
+        "debug": f"State: {current_state} | Options: {len(input_options)}",
     }
 
 

@@ -9,9 +9,10 @@ PIPE_STDIN="/tmp/gp-stdin"
 PIPE_CONTROL="/tmp/gp-control"
 
 # Defaults
-: "${LOG_LEVEL:=INFO}"      # Options: INFO, DEBUG, TRACE
-: "${VPN_MODE:=standard}"   # Options: standard, socks, gateway
+: "${LOG_LEVEL:=INFO}"
+: "${VPN_MODE:=standard}"
 : "${DNS_SERVERS:=}"        # Optional: Comma or space separated IPs (e.g. "8.8.8.8,1.1.1.1")
+: "${GP_ARGS:=}" # New: Allows passing custom arguments to gpclient
 
 # --- LOGGING HELPER ---
 declare -A LOG_PRIORITY
@@ -161,17 +162,16 @@ while true; do
 
     su - gpuser -c "
         export VPN_PORTAL=\"$VPN_PORTAL\"
+        export GP_ARGS=\"$GP_ARGS\"
         > \"$LOG_FILE\"
         exec 3<> \"$PIPE_STDIN\"
 
-        echo \"[Entrypoint Subshell] Launching gpclient binary with script wrapper...\" >> \"$DEBUG_LOG\"
+        # Launch gpclient with the PORTAL and the dynamic ARGS
+        CMD=\"stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
 
-        # --- FIX: Use 'script' to emulate TTY ---
-        # 1. 'stdbuf -oL -eL': Forces line buffering so logs appear instantly.
-        # 2. 'script -q -c ... /dev/null': Creates a fake TTY so gpclient doesn't crash.
-        # 3. '<&3': Feeds our named pipe into the fake TTY.
+        # Log the command being run for debug purposes
+        echo \"[Entrypoint] Running: \$CMD\" >> \"$DEBUG_LOG\"
 
-        CMD=\"stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote\"
         script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1
     "
 
