@@ -105,17 +105,6 @@
             background-color: #218838;
         }
 
-        .btn-outline {
-            background-color: transparent;
-            border: 2px solid #007bff;
-            color: #007bff;
-        }
-
-        .btn-outline:hover {
-            background-color: #007bff;
-            color: white;
-        }
-
         input[type="text"],
         input[type="password"],
         select {
@@ -224,6 +213,13 @@
             </form>
         </div>
 
+        <div id="view-error" class="hidden">
+            <div style="font-size: 50px; margin-bottom: 10px;">⚠️</div>
+            <p style="color:#721c24"><strong>Connection Failed</strong></p>
+            <p id="error-message">Unknown Error</p>
+            <button onclick="triggerConnect()" class="btn btn-primary">Retry Connection</button>
+        </div>
+
         <div id="view-connected" class="hidden">
             <div style="font-size: 50px; margin-bottom: 10px;">✅</div>
             <p><strong>Secure Connection Active</strong></p>
@@ -243,6 +239,8 @@
 
         async function triggerConnect() {
             document.getElementById('status-badge').innerText = "STARTING...";
+            // Reset views to avoid confusion while request processes
+            document.getElementById('view-error').classList.add('hidden');
             await fetch('/connect', { method: 'POST' });
         }
 
@@ -256,11 +254,13 @@
                 const response = await fetch('/status.json?t=' + Date.now());
                 const data = await response.json();
 
-                // Only switch views if the state has changed to preserve input focus
+                // 1. State Management
                 if (window.currentVpnState !== data.state) {
-                    ['idle', 'connecting', 'auth', 'input', 'connected'].forEach(id => {
-                        document.getElementById(`view-${id}`).classList.add('hidden');
+                    ['idle', 'connecting', 'auth', 'input', 'connected', 'error'].forEach(id => {
+                        const el = document.getElementById(`view-${id}`);
+                        if (el) el.classList.add('hidden');
                     });
+
                     const activeView = document.getElementById(`view-${data.state}`);
                     if (activeView) activeView.classList.remove('hidden');
 
@@ -270,15 +270,21 @@
                     window.currentVpnState = data.state;
                 }
 
+                // 2. Dynamic View Updates
                 if (data.state === 'auth' && data.url) {
                     const link = document.getElementById('sso-link');
                     if (link.getAttribute('href') !== data.url) link.href = data.url;
+                }
+
+                if (data.state === 'error') {
+                    document.getElementById('error-message').innerText = data.error || "Check logs for details.";
                 }
 
                 if (data.state === 'input') {
                     document.getElementById('input-prompt').innerText = data.prompt;
                     const container = document.getElementById('dynamic-input-container');
 
+                    // Only rebuild input if empty to prevent focus loss
                     if (!container.innerHTML) {
                         let html = '';
                         if (data.input_type === 'select' && data.options && data.options.length > 0) {
@@ -294,12 +300,16 @@
                     }
                 }
 
+                // 3. LOGGING FIX (The Missing Link)
                 if (data.log) {
-                    debug.innerText = `--- SERVER DEBUG INFO ---\n${data.debug || ''}\n\n--- VPN LOGS ---\n${data.log}`;
+                    const debugBox = document.getElementById('debug-box'); // Explicitly find the element
+                    debugBox.innerText = `--- SERVER DECISION ---\n${data.debug || ''}\n\n--- VPN LOGS ---\n${data.log}`;
                 }
+
             } catch (e) {
                 console.error("Poll failed", e);
-                debug.innerText = `Connection Error: ${e.message}`;
+                const debugBox = document.getElementById('debug-box');
+                if (debugBox) debugBox.innerText = `Connection Error: ${e.message}`;
             }
         }
         setInterval(updateStatus, 1500);
