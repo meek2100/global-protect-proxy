@@ -56,6 +56,12 @@
             border: 1px solid #bee5eb;
         }
 
+        .status-input {
+            background: #cce5ff;
+            color: #004085;
+            border: 1px solid #b8daff;
+        }
+
         .status-connected {
             background: #d4edda;
             color: #155724;
@@ -99,7 +105,9 @@
             background-color: #218838;
         }
 
-        input[type="text"] {
+        input[type="text"],
+        input[type="password"],
+        select {
             width: 100%;
             padding: 12px;
             border: 1px solid #ced4da;
@@ -107,6 +115,7 @@
             box-sizing: border-box;
             margin-bottom: 10px;
             font-size: 14px;
+            background: #fff;
         }
 
         .instruction-box {
@@ -195,6 +204,20 @@
             </form>
         </div>
 
+        <div id="view-input" class="hidden">
+            <h3 id="input-title">Additional Input Required</h3>
+            <div class="instruction-box" id="input-prompt">
+                Please follow the instructions.
+            </div>
+            <form action="/submit" method="POST">
+                <label for="user_input"
+                    style="display:block; text-align:left; margin-bottom:5px; font-weight:bold;">Response:</label>
+                <div id="dynamic-input-container">
+                </div>
+                <button type="submit" class="btn btn-primary">Send Response</button>
+            </form>
+        </div>
+
         <div id="view-connected" class="hidden">
             <div style="font-size: 50px; margin-bottom: 10px;">✅</div>
             <p><strong>Secure Connection Active</strong></p>
@@ -218,6 +241,7 @@
             const d = document.getElementById('debug-box');
             d.style.display = (d.style.display === 'none' || d.style.display === '') ? 'block' : 'none';
         }
+
         async function updateStatus() {
             const debug = document.getElementById('debug-box');
             try {
@@ -229,15 +253,50 @@
                 badge.className = `status-badge status-${data.state}`;
                 badge.innerText = data.state.toUpperCase();
 
-                ['idle', 'connecting', 'auth', 'connected'].forEach(id => {
-                    document.getElementById(`view-${id}`).classList.add('hidden');
+                // Hide all views first
+                ['idle', 'connecting', 'auth', 'input', 'connected'].forEach(id => {
+                    const el = document.getElementById(`view-${id}`);
+                    if (el) el.classList.add('hidden');
                 });
-                document.getElementById(`view-${data.state}`).classList.remove('hidden');
 
+                // Show active view
+                const activeView = document.getElementById(`view-${data.state}`);
+                if (activeView) activeView.classList.remove('hidden');
+
+                // Update View Logic
                 if (data.state === 'auth' && data.url) {
                     const link = document.getElementById('sso-link');
                     if (link.getAttribute('href') !== data.url) link.href = data.url;
                 }
+
+                if (data.state === 'input') {
+                    document.getElementById('input-prompt').innerText = data.prompt;
+
+                    const container = document.getElementById('dynamic-input-container');
+                    // Only rebuild if the content type changed or options changed to avoid typing interference
+                    // For simplicity, we just rebuild if empty or if options changed significantly
+                    // Or simpler: Rebuild every time but restore focus?
+                    // Let's just assume simple poll.
+
+                    let html = '';
+                    if (data.input_type === 'select' && data.options && data.options.length > 0) {
+                        html = '<select name="user_input" id="user_input">';
+                        data.options.forEach(opt => {
+                            html += `<option value="${opt}">${opt}</option>`;
+                        });
+                        html += '</select>';
+                    } else if (data.input_type === 'password') {
+                        html = '<input type="password" name="user_input" id="user_input" placeholder="Enter Password..." required autocomplete="off">';
+                    } else {
+                        html = '<input type="text" name="user_input" id="user_input" placeholder="Type answer here..." required autocomplete="off">';
+                    }
+
+                    // Simple check to avoid overwriting user input while they type
+                    if (!container.innerHTML || (data.input_type === 'select' && !container.innerHTML.includes('select'))) {
+                        container.innerHTML = html;
+                    }
+                }
+
                 if (data.log) {
                     debug.innerText = `--- SERVER DEBUG INFO ---\n${data.debug || ''}\n\n--- VPN LOGS ---\n${data.log}`;
                 }

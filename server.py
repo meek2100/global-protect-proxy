@@ -48,6 +48,12 @@ logging.basicConfig(
 logger = logging.getLogger()
 
 
+def strip_ansi(text):
+    """Removes ANSI escape sequences from log lines."""
+    ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+    return ansi_escape.sub("", text)
+
+
 def get_vpn_state():
     """
     Determines the current state of the VPN.
@@ -68,14 +74,23 @@ def get_vpn_state():
 
     log_content = ""
     sso_url = ""
+    prompt_msg = ""
+    prompt_type = "text"  # text, password, select
+    input_options = []
 
     if os.path.exists(LOG_FILE):
         try:
             with open(LOG_FILE, "r", errors="replace") as f:
                 lines = f.readlines()
+                # Keep last 300 lines for display
                 log_content = "".join(lines[-300:])
 
-                for line in reversed(lines):
+                # Create clean lines for parsing (strip colors)
+                # We check the last 50 lines for active prompts
+                clean_lines = [strip_ansi(l) for l in lines[-50:]]
+
+                # 1. Check for Success
+                for line in reversed(clean_lines):
                     if "Connected" in line:
                         state = "connected"
                         logger.debug("State transition detected: CONNECTED")
@@ -84,32 +99,75 @@ def get_vpn_state():
                             "log": "VPN Established Successfully!",
                         }
 
-                # Scan for Auth URL
-                is_manual_auth = "Manual Authentication Required" in log_content
-                url_pattern = re.compile(r'(https?://[^\s"<>]+)')
+                # 2. Check for Interactive Prompts (PRIORITY OVER AUTH)
+                for i, line in enumerate(reversed(clean_lines)):
+                    line_stripped = line.strip()
 
-                # Trace logging for parser logic (Only if LOG_LEVEL=TRACE)
-                logger.trace(f"Parsing {len(lines)} lines for URLs...")
+                    # A. Gateway Selection (Dropdown)
+                    if "Which gateway do you want to connect to" in line:
+                        state = "input"
+                        prompt_msg = "Select Gateway:"
+                        prompt_type = "select"
 
-                for i, line in enumerate(reversed(lines)):
-                    if "prelogin.esp" in line:
-                        continue
-                    match = url_pattern.search(line)
-                    if match:
-                        found_url = match.group(1)
-                        logger.trace(f"Line -{i}: Potential URL found: {found_url}")
+                        # Scrape options from the lines we just reversed
+                        gateway_regex = re.compile(
+                            r"(?:>)?\s+([a-zA-Z0-9-]+\s+\([a-zA-Z0-9.-]+\))"
+                        )
+                        seen = set()
+                        for l in clean_lines:
+                            m = gateway_regex.search(l)
+                            if m:
+                                opt = m.group(1).strip()
+                                if opt not in seen:
+                                    seen.add(opt)
+                                    input_options.append(opt)
+                        break
 
-                        # --- FIX: Loose filter if manual auth is detected ---
-                        # The local callback URL usually looks like http://192.168.x.x:port/uuid
-                        # It does NOT contain 'saml' or 'sso'.
-                        if (
-                            "saml" in found_url.lower()
-                            or "sso" in found_url.lower()
-                            or "login" in found_url.lower()
-                            or (is_manual_auth and "http://" in found_url)
-                        ):
-                            sso_url = found_url
-                            state = "auth"
+                    # B. Specific Inputs (Masked)
+                    if "password:" in line.lower():
+                        state = "input"
+                        prompt_msg = line_stripped
+                        prompt_type = "password"
+                        break
+
+                    if "username:" in line.lower():
+                        state = "input"
+                        prompt_msg = line_stripped
+                        prompt_type = "text"
+                        break
+
+                    # C. Generic Catch-All (2FA, Challenges, etc.)
+                    # Logic: Line does NOT start with timestamp '[' AND ends with ':' or '?'
+                    # We also filter out "browser" instructions to avoid grabbing the Auth text.
+                    if re.match(r"^[^\[].*[:?]\s*$", line_stripped):
+                        # Filter out common false positives
+                        if "browser" in line.lower() or "url" in line.lower():
+                            continue
+
+                        state = "input"
+                        prompt_msg = line_stripped
+                        prompt_type = "text"
+                        break
+
+                # 3. Check for Auth URL (Only if we aren't already prompting for input)
+                if state != "input":
+                    is_manual_auth = "Manual Authentication Required" in log_content
+                    url_pattern = re.compile(r'(https?://[^\s"<>]+)')
+
+                    for line in reversed(lines[-300:]):
+                        if "prelogin.esp" in line:
+                            continue
+                        match = url_pattern.search(line)
+                        if match:
+                            found_url = match.group(1)
+                            if (
+                                "saml" in found_url.lower()
+                                or "sso" in found_url.lower()
+                                or "login" in found_url.lower()
+                                or (is_manual_auth and "http://" in found_url)
+                            ):
+                                sso_url = found_url
+                                state = "auth"
                             logger.debug(
                                 f"State transition detected: AUTH | URL: {sso_url[:30]}..."
                             )
@@ -125,8 +183,11 @@ def get_vpn_state():
     return {
         "state": state,
         "url": sso_url,
+        "prompt": prompt_msg,
+        "input_type": prompt_type,
+        "options": input_options,
         "log": log_content,
-        "debug": f"State: {state} | Level: {env_level}",
+        "debug": f"State: {state} | Type: {prompt_type}",
     }
 
 
@@ -140,7 +201,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(get_vpn_state()).encode("utf-8"))
             return
 
-        # --- NEW: Download Logs Endpoint ---
         if self.path == "/download_logs":
             try:
                 self.send_response(200)
@@ -186,13 +246,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 content_length = int(self.headers.get("Content-Length", 0))
                 post_data = self.rfile.read(content_length).decode("utf-8")
                 parsed_data = urllib.parse.parse_qs(post_data)
-                if "callback_url" in parsed_data:
-                    raw_input = parsed_data["callback_url"][0].strip()
-                    logger.info(f"User submitted callback. Length: {len(raw_input)}")
-                    logger.debug(f"Callback payload: {raw_input[:20]}...")
 
+                user_input = ""
+                if "callback_url" in parsed_data:
+                    user_input = parsed_data["callback_url"][0].strip()
+                elif "user_input" in parsed_data:
+                    user_input = parsed_data["user_input"][0].strip()
+
+                if user_input:
+                    logger.info(f"User submitted input. Length: {len(user_input)}")
                     with open(FIFO_STDIN, "w") as fifo:
-                        fifo.write(raw_input + "\n")
+                        fifo.write(user_input + "\n")
                         fifo.flush()
                     self.send_response(200)
                     self.send_header("Content-type", "text/html")
@@ -201,8 +265,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         b"<html><head><meta http-equiv='refresh' content='0;url=/'></head><body>Sent.</body></html>"
                     )
                 else:
-                    logger.warning("Received /submit without callback_url")
-                    self.send_error(400, "Missing callback_url")
+                    self.send_error(400, "Missing input data")
             except Exception as e:
                 logger.error(f"Error submitting code: {e}")
                 self.send_error(500, str(e))
