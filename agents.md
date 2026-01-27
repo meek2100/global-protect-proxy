@@ -17,6 +17,13 @@ The system uses a "Split Brain" architecture for stability:
     - Manages `gpclient` process.
     - **Logging:** Uses custom log function mapping to `LOG_LEVEL`.
 
+### Privilege Separation Strategy
+
+The container operates primarily as the non-root user `gpuser` to secure the web interface and log files. However, VPN tunnel creation requires root privileges.
+
+- **`gpuser`:** Runs the Python web server, `microsocks`, and the `gpservice` background daemon.
+- **`sudo gpclient`:** The connection client runs as `root` (invoked via passwordless `sudo` by `gpuser`) to allow manipulation of the kernel network stack (specifically `TUNSETIFF` operations).
+
 ## Environment Variables
 
 | Variable      | Default      | Description                                                                                                              |
@@ -40,7 +47,7 @@ The system uses a "Split Brain" architecture for stability:
 
 ## Key Files
 
-- **`entrypoint.sh`:** Handles `VPN_MODE` logic, DNS configuration, and network setup.
+- **`entrypoint.sh`:** Handles `VPN_MODE` logic, DNS configuration, and network setup. Invokes `gpclient` using `sudo`.
 - **`server.py`:** Handles `LOG_LEVEL` parsing and log analysis.
 - **`debug_parser.log`:** The primary debug artifact. Both Bash and Python write here.
 

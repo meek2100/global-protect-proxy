@@ -28,6 +28,7 @@ FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# 1. Added 'sudo' to the install list
 RUN apt-get update && apt-get install -y \
     microsocks python3 iptables iproute2 net-tools \
     iputils-ping traceroute dnsutils curl procps \
@@ -37,18 +38,25 @@ RUN apt-get update && apt-get install -y \
     libgtk-3-0 libwebkit2gtk-4.1-0 \
     libjavascriptcoregtk-4.1-0 libsoup-3.0-0 \
     libayatana-appindicator3-1 librsvg2-common \
-    libcap2-bin \
+    libcap2-bin sudo \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash gpuser
+
+# 2. Configure passwordless sudo for gpuser
+# Required because gpclient needs root to create the TUN device (TUNSETIFF),
+# but the rest of the container logic (logs, python UI) runs as gpuser.
+RUN echo "gpuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gpuser && \
+    chmod 0440 /etc/sudoers.d/gpuser
+
 COPY --from=builder /usr/src/app/target/release/gpclient /usr/bin/
 COPY --from=builder /usr/src/app/target/release/gpservice /usr/bin/
 COPY --from=builder /usr/src/app/target/release/gpauth /usr/bin/
 
 # --- PERMISSIONS: Allow gpservice to manage network as gpuser ---
 # We add cap_net_bind_service to allow binding to privileged/system ports if needed.
-# Without this, gpservice fails to create tun0.
+# Without this, gpservice fails to create tun0 or bind ports.
 RUN setcap 'cap_net_admin,cap_net_bind_service+ep' /usr/bin/gpservice
 
 RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \

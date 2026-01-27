@@ -166,12 +166,15 @@ while true; do
         > \"$LOG_FILE\"
         exec 3<> \"$PIPE_STDIN\"
 
-        # Launch gpclient with the PORTAL and the dynamic ARGS
-        CMD=\"stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
+        # Launch gpclient with sudo to allow TUN/TAP device creation.
+        # Although we are running inside 'su - gpuser', sudo elevates gpclient back to root
+        # to satisfy kernel permissions (TUNSETIFF).
+        CMD=\"stdbuf -oL -eL sudo gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
 
         # Log the command being run for debug purposes
         echo \"[Entrypoint] Running: \$CMD\" >> \"$DEBUG_LOG\"
 
+        # Use script to maintain pty for interactivity while redirecting output to log file.
         script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1
     "
 
