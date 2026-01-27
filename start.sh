@@ -4,6 +4,7 @@ set -e
 # --- CONFIG ---
 STATUS_FILE="/var/www/html/status.json"
 LOG_FILE="/tmp/gp-logs/vpn.log"
+DEBUG_LOG="/tmp/gp-logs/debug_parser.log"
 
 # --- 1. DNS FIX FOR MACVLAN/PORTAINER ---
 echo "Force-updating /etc/resolv.conf..."
@@ -45,15 +46,15 @@ write_state() {
     STATE="$1"
     URL="$2"
     TEXT="$3"
-    SAFE_URL=$(echo "$URL" | sed 's/"/\\"/g')
-    SAFE_TEXT=$(echo "$TEXT" | sed 's/"/\\"/g')
-    # Escape backslashes for JSON compatibility
-    LOG_CONTENT=$(tail -n 20 "$LOG_FILE" 2>/dev/null | awk '{printf "%s\\n", $0}' | sed 's/"/\\"/g')
+    DEBUG_MSG="$4"
+    LOG_CONTENT=$(tail -n 15 "$LOG_FILE" 2>/dev/null | awk '{printf "%s\\n", $0}' | sed 's/"/\\"/g')
+
     cat <<JSON > "$STATUS_FILE.tmp"
 {
   "state": "$STATE",
-  "url": "$SAFE_URL",
-  "link_text": "$SAFE_TEXT",
+  "url": "$(echo "$URL" | sed 's/"/\\"/g')",
+  "link_text": "$(echo "$TEXT" | sed 's/"/\\"/g')",
+  "debug": "$(echo "$DEBUG_MSG" | sed 's/"/\\"/g')",
   "log": "$LOG_CONTENT"
 }
 JSON
@@ -61,105 +62,65 @@ JSON
 }
 
 echo "=== Container Started ==="
-
-rm -f /var/run/gpservice.lock /tmp/gp-stdin /tmp/gp-control
-
-if ! touch /var/run/gpservice.lock; then
-    echo "CRITICAL ERROR: Could not create lock file."
-    exit 1
-fi
-chown gpuser:gpuser /var/run/gpservice.lock
-
+rm -f /tmp/gp-stdin /tmp/gp-control /var/run/gpservice.lock
 mkfifo /tmp/gp-stdin /tmp/gp-control
-chown gpuser:gpuser /tmp/gp-stdin /tmp/gp-control
 chmod 666 /tmp/gp-stdin /tmp/gp-control
-
-mkdir -p /tmp/gp-logs
-touch "$LOG_FILE"
+touch "$LOG_FILE" "$DEBUG_LOG"
 chown -R gpuser:gpuser /tmp/gp-logs /var/www/html
 
-echo "Starting Microsocks..."
+echo "Starting Services..."
 su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
+su - gpuser -c "python3 /var/www/html/server.py >> \"$LOG_FILE\" 2>&1 &"
+su - gpuser -c "/usr/bin/gpservice >> \"$LOG_FILE\" 2>&1 &"
 
-echo "Starting Web Interface..."
-if [ -f /var/www/html/server.py ]; then
-    su - gpuser -c "python3 /var/www/html/server.py >> \"$LOG_FILE\" 2>&1 &"
-else
-    echo "WARNING: server.py missing!"
-fi
+write_state "idle" "" "" "Waiting for user to click connect..."
 
-echo "Starting GlobalProtect Service (Headless)..."
-su - gpuser -c "/usr/bin/gpservice &"
-sleep 1
-
-tail -f "$LOG_FILE" &
-
-write_state "idle" "" ""
-echo "State: IDLE. Waiting for user..."
-
-# --- MAIN LOOP ---
 while true; do
-    # 2. WAIT FOR USER SIGNAL FROM WEB UI
     read _ < /tmp/gp-control
-
-    write_state "connecting" "" ""
-    echo "State: CONNECTING..."
-
-    if [ -z "$VPN_PORTAL" ]; then
-        echo "ERROR: VPN_PORTAL environment variable is not set!" >> "$LOG_FILE"
-    fi
+    write_state "connecting" "" "" "Signal received, starting gpclient..."
 
     su - gpuser -c "
         export VPN_PORTAL=\"$VPN_PORTAL\"
         exec 3<> /tmp/gp-stdin
         > \"$LOG_FILE\"
+        > \"$DEBUG_LOG\"
 
         while true; do
-            echo \"Attempting connection to \$VPN_PORTAL...\" >> \"$LOG_FILE\"
+            echo \"DEBUG: Launching gpclient...\" >> \"$DEBUG_LOG\"
 
+            # Using stdbuf to ensure the log catches every line immediately
             CMD=\"gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote\"
             script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1 &
             CLIENT_PID=\$!
 
             while kill -0 \$CLIENT_PID 2>/dev/null; do
+                # 1. Check for success
                 if grep -q \"Connected\" \"$LOG_FILE\"; then
-                    # Manually update state to connected
-                    cat <<JSON > $STATUS_FILE.tmp
-{ \"state\": \"connected\", \"log\": \"VPN Connected Successfully\" }
-JSON
-                    mv $STATUS_FILE.tmp $STATUS_FILE
+                    write_state \"connected\" \"\" \"\" \"VPN Established!\"
 
-                # NEW REGEX: Matches both http/https and includes port numbers and hyphens
-                elif grep -oE \"https?://[0-9a-zA-Z./:-]+\" \"$LOG_FILE\" | grep -v \"prelogin.esp\" | grep -q \"http\"; then
+                # 2. Advanced URL Detection logic
+                else
+                    # Scan for ANY http/https link that isn't prelogin
+                    FOUND_URL=\$(grep -oE \"https?://[0-9a-zA-Z./:-]+\" \"$LOG_FILE\" | grep -v \"prelogin.esp\" | tail -1)
 
-                     RAW_URL=\$(grep -oE \"https?://[0-9a-zA-Z./:-]+\" \"$LOG_FILE\" | grep -v \"prelogin.esp\" | tail -1)
+                    if [ -n \"\$FOUND_URL\" ]; then
+                        # Clean the URL
+                        CLEAN_URL=\$(echo \"\$FOUND_URL\" | tr -d '[:space:]' | sed 's/[\")\\\\\\\\\\\\]*\$//')
+                        echo \"DEBUG: Found URL: \$CLEAN_URL\" >> \"$DEBUG_LOG\"
 
-                     # Clean any trailing punctuation or terminal artifacts
-                     CLEAN_URL=\$(echo \"\$RAW_URL\" | tr -d '[:space:]' | sed 's/[\")\\\\\\\\\\\\]*\$//')
-
-                     if [ -n \"\$CLEAN_URL\" ]; then
-                         LINK_TEXT=\"Open Login Page (SSO)\"
-                         LOG_CONTENT=\$(tail -n 20 \"$LOG_FILE\" | awk '{printf \"%s\\\\\\\\\\\\\\\\n\", \$0}' | sed 's/\"/\\\\\\\\\\\\\\\\\"/g')
-
-                         cat <<JSON > $STATUS_FILE.tmp
-{
-  \"state\": \"auth\",
-  \"url\": \"\$CLEAN_URL\",
-  \"link_text\": \"\$LINK_TEXT\",
-  \"log\": \"\$LOG_CONTENT\"
-}
-JSON
-                         mv $STATUS_FILE.tmp $STATUS_FILE
-                     fi
+                        LINK_TEXT=\"Open Login Page (SSO)\"
+                        # Explicitly call the function to update JSON
+                        write_state \"auth\" \"\$CLEAN_URL\" \"\$LINK_TEXT\" \"Captured URL from logs.\"
+                    else
+                        # Just update the log content in the UI while waiting
+                        write_state \"connecting\" \"\" \"\" \"Scanning logs for SSO URL...\"
+                    fi
                 fi
-                sleep 1
+                sleep 2
             done
 
-            # If client dies, notify UI and wait before retry
-            cat <<JSON > $STATUS_FILE.tmp
-{ \"state\": \"idle\", \"log\": \"Connection lost or failed. Re-click Connect.\" }
-JSON
-            mv $STATUS_FILE.tmp $STATUS_FILE
+            echo \"DEBUG: gpclient process died.\" >> \"$DEBUG_LOG\"
+            write_state \"idle\" \"\" \"\" \"Process exited. Check Logs.\"
             sleep 5
         done
     " &
