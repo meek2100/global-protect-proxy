@@ -7,6 +7,7 @@ import re
 import json
 import logging
 import shutil
+import subprocess
 
 # --- Configuration ---
 PORT = 8001
@@ -17,7 +18,6 @@ MODE_FILE = "/tmp/gp-mode"
 DEBUG_LOG = "/tmp/gp-logs/debug_parser.log"
 
 # --- Logging Setup ---
-# We use a custom format to clearly distinguish Server logic from VPN logic
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "DEBUG").upper(),
     format="[%(asctime)s] [SERVER] %(levelname)s: %(message)s",
@@ -29,7 +29,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger()
 
-# State cache to prevent log spam on every poll
 last_known_state = None
 
 
@@ -63,10 +62,9 @@ def get_vpn_state():
     """
     global last_known_state
 
-    # default state
     current_state = "idle"
 
-    # 1. Check coarse process state (The Container's Mode)
+    # 1. Check Mode File
     if os.path.exists(MODE_FILE):
         try:
             with open(MODE_FILE, "r") as f:
@@ -86,54 +84,43 @@ def get_vpn_state():
     input_options = []
     error_msg = ""
 
-    # 2. Analyze the 'Parts' (The Logs) to understand the 'Whole' (The Status)
+    # 2. Parse Logs
     if os.path.exists(LOG_FILE):
         try:
             with open(LOG_FILE, "r", errors="replace") as f:
                 lines = f.readlines()
-                log_content = "".join(lines[-300:])  # Keep last 300 lines for UI
-
-                # Clean lines for logic processing
+                log_content = "".join(lines[-300:])
                 clean_lines = [strip_ansi(l).strip() for l in lines[-100:]]
 
-                # --- HERMENEUTIC ANALYSIS OF LOGS ---
-
-                # A. Did we succeed?
+                # A. Success Check
                 for line in reversed(clean_lines):
-                    if "Connected" in line and "to" in line:  # OpenConnect success msg
+                    if "Connected" in line and "to" in line:
                         current_state = "connected"
                         break
 
-                # B. Did we fail? (The missing link in your previous code)
-                # We prioritize errors to stop the loop.
+                # B. Error Check
                 if current_state != "connected":
                     for line in reversed(clean_lines):
                         if "Login failed" in line or "GP response error" in line:
                             current_state = "error"
-                            # Extract specific error if possible
                             if "512" in line:
                                 error_msg = "Gateway Rejected Connection (Error 512). Check Gateway selection or User Agent."
                             else:
                                 error_msg = line
                             break
 
-                # C. Does the CLI need us? (Interactive Prompts)
+                # C. Input/Prompt Check
                 if current_state not in ["connected", "error"]:
-                    for i, line in enumerate(reversed(clean_lines)):
-                        # Gateway Selection
+                    for line in reversed(clean_lines):
                         if "Which gateway do you want to connect to" in line:
                             current_state = "input"
                             prompt_msg = "Select Gateway:"
                             prompt_type = "select"
 
-                            # Parse Options (Scan forward from the prompt in the *raw* lines ideally,
-                            # but clean lines work if stripped correctly)
-                            # We look for lines like: "  Lehi-Gateway (vpn.snapone.com)"
+                            # Cleanly extract options
                             gateway_regex = re.compile(
                                 r"^\s*([A-Za-z0-9\-\.]+\s+\([A-Za-z0-9\-\.]+\))"
                             )
-
-                            # Scan the whole clean buffer for options
                             seen = set()
                             for l in clean_lines:
                                 m = gateway_regex.search(l)
@@ -144,7 +131,6 @@ def get_vpn_state():
                                         input_options.append(opt)
                             break
 
-                        # Password / Username
                         if "password:" in line.lower():
                             current_state = "input"
                             prompt_msg = "Enter Password:"
@@ -157,37 +143,30 @@ def get_vpn_state():
                             prompt_type = "text"
                             break
 
-                # D. Authentication (The Sticky State)
-                # If we are connecting/input but see auth URLs, we shift to Auth mode
-                if current_state in ["connecting", "input"]:
+                # D. Auth Check (FIXED: LOGIC SHADOW)
+                # We ONLY check for Auth if we are stuck in 'connecting'.
+                # If we are already in 'input', we have passed the initial auth request.
+                if current_state == "connecting":
                     is_manual_auth = "Manual Authentication Required" in log_content
                     auth_server_active = "auth server started" in log_content
 
                     if is_manual_auth or auth_server_active:
                         current_state = "auth"
-                        # Extract SAML URL
+                        # Extract URL
                         url_pattern = re.compile(r'(https?://[^\s"<>]+)')
                         found_urls = url_pattern.findall(log_content)
                         if found_urls:
-                            # Heuristic: The last URL is usually the one we want.
-                            # Prefer URLs that look like our local auth server
                             local_urls = [
                                 u
                                 for u in found_urls
                                 if str(PORT) not in u and "127.0.0.1" not in u
                             ]
-                            if local_urls:
-                                sso_url = local_urls[-1]
-                            # Fallback to any URL found (handling the local auth server redirect)
-                            if not sso_url and found_urls:
-                                sso_url = found_urls[-1]
+                            sso_url = local_urls[-1] if local_urls else found_urls[-1]
 
         except Exception as e:
-            logger.error(f"Error parsing log file: {e}")
+            logger.error(f"Log parse error: {e}")
             log_content += f"\n[System Error: {e}]"
 
-    # --- Logging the 'Why' (Hermeneutic Context) ---
-    # Only log if state changed to reduce noise, but keep context available
     if current_state != last_known_state:
         logger.info(f"State Transition: {last_known_state} -> {current_state}")
         if current_state == "input":
@@ -203,7 +182,7 @@ def get_vpn_state():
         "url": sso_url,
         "prompt": prompt_msg,
         "input_type": prompt_type,
-        "options": sorted(input_options),  # Sort for UX consistency
+        "options": sorted(input_options),
         "error": error_msg,
         "log": log_content,
         "debug": f"Server Decision: {current_state} | Input Options: {len(input_options)}",
@@ -249,11 +228,30 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/connect":
             logger.info("User requested Connection (POST /connect)")
-            with open(FIFO_CONTROL, "w") as f:
-                f.write("START\n")
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"OK")
+
+            # --- FIX: DEADLOCK PREVENTION ---
+            # If gpclient is currently running (waiting for input), the entrypoint
+            # script is blocked and NOT reading the pipe. We must kill it first.
+            try:
+                logger.info("Ensuring previous gpclient processes are terminated...")
+                subprocess.run(["pkill", "gpclient"], stderr=subprocess.DEVNULL)
+                # Small delay to allow entrypoint.sh to loop back to 'read'
+                import time
+
+                time.sleep(0.5)
+            except Exception as e:
+                logger.error(f"Failed to kill gpclient: {e}")
+
+            # Now safe to write to the pipe
+            try:
+                with open(FIFO_CONTROL, "w") as f:
+                    f.write("START\n")
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"OK")
+            except Exception as e:
+                logger.error(f"Failed to write to control pipe: {e}")
+                self.send_error(500, "Failed to start VPN process")
             return
 
         if self.path == "/submit":
@@ -261,7 +259,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", 0))
                 data = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
 
-                # Determine what was submitted
                 user_input = ""
                 if "callback_url" in data:
                     user_input = data["callback_url"][0].strip()
@@ -271,7 +268,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     logger.info(f"User submitted Interactive Input: '{user_input}'")
 
                 if user_input:
-                    # Write to the pipe that feeds gpclient
                     with open(FIFO_STDIN, "w") as fifo:
                         fifo.write(user_input + "\n")
                         fifo.flush()
@@ -299,7 +295,6 @@ if __name__ == "__main__":
         os.mkfifo(FIFO_CONTROL)
         os.chmod(FIFO_CONTROL, 0o666)
 
-    # Allow quick restarts during dev/debug
     socketserver.TCPServer.allow_reuse_address = True
 
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
