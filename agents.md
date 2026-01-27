@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This project encapsulates a GlobalProtect VPN client inside a Docker container, exposing it via a SOCKS5 proxy (`microsocks`) on port 1080. It uses a custom Python-based web UI on port 8001 to handle the authentication flow, specifically designed for SAML/SSO environments where a GUI is not available.
+This project encapsulates a GlobalProtect VPN client inside a Docker container, exposing it via a SOCKS5 proxy (`microsocks`) on port 1080. It uses a custom Python-based web UI on port 8001 to handle the authentication flow.
 
 ## Architecture
 
@@ -10,35 +10,39 @@ The system uses a "Split Brain" architecture for stability:
 
 1.  **The Brain (Python - `server.py`):**
     - Runs the Web UI.
-    - Parses logs (`vpn.log`) to determine state (`idle`, `auth`, `connected`).
-    - Receives user input (callbacks).
-    - Writes commands to Named Pipes.
+    - Parses logs (`vpn.log`) to determine state.
+    - **Logging:** Uses structured python logging. controlled by `LOG_LEVEL`.
 2.  **The Muscle (Bash - `entrypoint.sh`):**
-    - Sets up networking (iptables, DNS).
-    - Manages the `gpclient` process lifecycle.
-    - Reads from Named Pipes to start/stop the VPN.
+    - Sets up networking based on `VPN_MODE`.
+    - Manages `gpclient` process.
+    - **Logging:** Uses custom log function mapping to `LOG_LEVEL`.
+
+## Environment Variables
+
+| Variable     | Default      | Description                                                                                      |
+| :----------- | :----------- | :----------------------------------------------------------------------------------------------- |
+| `VPN_PORTAL` | **Required** | The URL of your GlobalProtect portal.                                                            |
+| `LOG_LEVEL`  | `INFO`       | Controls verbosity. Options: `TRACE` (Granular), `DEBUG` (Process flow), `INFO` (State changes). |
+| `VPN_MODE`   | `standard`   | Controls functionality. Options: `standard`, `socks`, `gateway`.                                 |
+
+### Operational Modes (`VPN_MODE`)
+
+- **`standard`:** Starts `microsocks` (port 1080) AND configures `iptables` for NAT/IP Forwarding. Best for general use.
+- **`socks`:** Starts `microsocks` ONLY. Disables IP Forwarding and NAT. Use this if you only need the SOCKS5 proxy and want to lock down the container.
+- **`gateway`:** Configures NAT/IP Forwarding ONLY. Does not start `microsocks`. Use this if using the container strictly as a gateway for other devices (via macvlan).
 
 ## Key Files
 
-- **`entrypoint.sh`:** The container entrypoint. Handles root-level network setup, creates pipes (`/tmp/gp-control`, `/tmp/gp-stdin`), and loops waiting for start signals.
-- **`server.py`:** Runs as `gpuser`. Serves `index.html` and `status.json`. It is the source of truth for the application state.
-- **`index.html`:** The frontend. Polls `/status.json`.
-- **`vpn.log`:** The shared memory. `gpclient` writes here; `server.py` reads here.
-
-## State Management (Important)
-
-- **Idle:** `entrypoint.sh` has not started `gpclient`. `/tmp/gp-mode` contains "idle".
-- **Connecting:** `entrypoint.sh` is running `gpclient`. `/tmp/gp-mode` contains "active".
-- **Auth:** `server.py` detected a SAML URL in `vpn.log`.
-- **Connected:** `server.py` detected "Connected" in `vpn.log`.
+- **`entrypoint.sh`:** Handles `VPN_MODE` logic and network setup.
+- **`server.py`:** Handles `LOG_LEVEL` parsing and log analysis.
+- **`debug_parser.log`:** The primary debug artifact. Both Bash and Python write here.
 
 ## Handling Callbacks (`globalprotect://`)
 
 The SAML flow often ends with a redirect to `globalprotect://...`.
 
-- **Problem:** The browser cannot open this link (no app installed).
-- **Solution:** The user must copy this URL manually.
-- **Handling:** `server.py` accepts the raw `globalprotect://` URL via the `/submit` endpoint and passes it to the `gpclient` stdin pipe. The client binary handles the parsing.
+- **Handling:** `server.py` accepts the raw URL via `/submit` and passes it to `gpclient`.
+- **Debug:** Set `LOG_LEVEL=TRACE` to see exactly which lines the regex parser is scanning and rejecting.
 
 ## Future Improvements
 
