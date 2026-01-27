@@ -8,33 +8,43 @@ LOG_FILE="/tmp/gp-logs/vpn.log"
 # --- GATEWAY SETUP (Run as Root) ---
 echo "=== Network Setup ==="
 
-# Smart IP Forwarding Check
-# If Docker has already set this (via sysctls), we skip writing to the read-only file.
+# 1. Smart IP Forwarding Check
 if [ "$(cat /proc/sys/net/ipv4/ip_forward)" = "1" ]; then
     echo "IP Forwarding is already enabled (via docker-compose)."
 else
     echo "Attempting to enable IP Forwarding..."
-    # If not enabled, try to write. If read-only, print warning but don't crash.
     echo 1 > /proc/sys/net/ipv4/ip_forward || echo "WARNING: Could not write to ip_forward. Ensure 'sysctls -net.ipv4.ip_forward=1' is set in docker-compose."
 fi
 
-# Configure NAT/Masquerade for Gateway Mode
+# 2. Firewall Rules (Explicitly Allow Ports)
+iptables -F
+iptables -t nat -F
+
+# Allow Local Loopback
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+
+# Allow Incoming Web (8001) and SOCKS5 (1080)
+echo "Allowing inbound traffic on ports 8001 and 1080..."
+iptables -A INPUT -p tcp --dport 8001 -j ACCEPT
+iptables -A INPUT -p tcp --dport 1080 -j ACCEPT
+iptables -A INPUT -p udp --dport 1080 -j ACCEPT
+
+# NAT/Masquerade for Gateway Mode
 iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
 iptables -A FORWARD -i eth0 -o tun0 -j ACCEPT
 iptables -A FORWARD -i tun0 -o eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 
-echo "NAT and Forwarding configured."
+echo "NAT and Firewall configured."
 
 # --- HELPER: Write JSON State ---
 write_state() {
     STATE="$1"
     URL="$2"
     TEXT="$3"
-
     SAFE_URL=$(echo "$URL" | sed 's/"/\\"/g')
     SAFE_TEXT=$(echo "$TEXT" | sed 's/"/\\"/g')
     LOG_CONTENT=$(tail -n 20 "$LOG_FILE" 2>/dev/null | awk '{printf "%s\\n", $0}' | sed 's/"/\\"/g')
-
     cat <<JSON > "$STATUS_FILE.tmp"
 {
   "state": "$STATE",
@@ -74,13 +84,12 @@ su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
 
 echo "Starting Web Interface..."
 if [ -f /var/www/html/server.py ]; then
-    su - gpuser -c "python3 /var/www/html/server.py > /tmp/gp-logs/web.log 2>&1 &"
+    su - gpuser -c "python3 /var/www/html/server.py >> \"$LOG_FILE\" 2>&1 &"
 else
     echo "WARNING: server.py missing!"
 fi
 
 echo "Starting GlobalProtect Service (Headless)..."
-# Thanks to the patch, this will now run happily without needing the GUI helper
 su - gpuser -c "/usr/bin/gpservice &"
 sleep 1
 
@@ -99,35 +108,36 @@ write_state "connecting" "" ""
 echo "State: CONNECTING..."
 
 # 3. Connection Loop
-export VPN_PORTAL
+# We verify the variable exists in ROOT context first
+if [ -z "$VPN_PORTAL" ]; then
+    echo "ERROR: VPN_PORTAL environment variable is not set!" >> "$LOG_FILE"
+fi
 
 su - gpuser -c "
+    # --- FIX: INJECT VARIABLE INTO USER SESSION ---
+    # The outer shell expands \$VPN_PORTAL, passing the value into the inner scope
+    export VPN_PORTAL=\"$VPN_PORTAL\"
+
     exec 3<> /tmp/gp-stdin
     > \"$LOG_FILE\"
 
     while true; do
         echo \"Attempting connection to \$VPN_PORTAL...\" >> \"$LOG_FILE\"
 
-        # --- TTY FIX & Headless Browser ---
+        # Now \$VPN_PORTAL will actually contain the URL
         CMD=\"gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote\"
 
-        # Use script to fake a TTY, pipe stdin from our FIFO
         script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1 &
         CLIENT_PID=\$!
 
         while kill -0 \$CLIENT_PID 2>/dev/null; do
-            # 1. CHECK CONNECTED
             if grep -q \"Connected\" \"$LOG_FILE\"; then
                 cat <<JSON > $STATUS_FILE.tmp
 { \"state\": \"connected\", \"log\": \"VPN Connected Successfully\" }
 JSON
                 mv $STATUS_FILE.tmp $STATUS_FILE
-
-            # 2. CHECK AUTH REQUIRED (Extract SSO URL)
             elif grep -qE \"https?://.*/.*\" \"$LOG_FILE\"; then
                  LOCAL_URL=\$(grep -oE \"https?://[^ ]+\" \"$LOG_FILE\" | tail -1)
-
-                 # Attempt to resolve localhost redirects
                  REAL_URL=\$(export http_proxy=; export https_proxy=; python3 -c \"
 import urllib.request, sys
 try:
@@ -137,15 +147,10 @@ try:
 except Exception as e:
     print(f'DEBUG_ERROR: {e}', file=sys.stderr)
 \" 2>> \"$LOG_FILE\")
-
-                 if [ -z \"\$REAL_URL\" ]; then
-                     REAL_URL=\"\$LOCAL_URL\"
-                 fi
+                 if [ -z \"\$REAL_URL\" ]; then REAL_URL=\"\$LOCAL_URL\"; fi
 
                  LINK_TEXT=\"Open Login Page (SSO)\"
-
                  LOG_CONTENT=\$(tail -n 20 \"$LOG_FILE\" | awk '{printf \"%s\\\\n\", \$0}' | sed 's/\"/\\\\\"/g')
-
                  cat <<JSON > $STATUS_FILE.tmp
 {
   \"state\": \"auth\",
