@@ -18,31 +18,24 @@ EOF
 echo "=== Network Setup ==="
 
 if [ "$(cat /proc/sys/net/ipv4/ip_forward)" = "1" ]; then
-    echo "IP Forwarding is already enabled (via docker-compose)."
+    echo "IP Forwarding is already enabled."
 else
-    echo "Attempting to enable IP Forwarding..."
     echo 1 > /proc/sys/net/ipv4/ip_forward || echo "WARNING: Could not write to ip_forward."
 fi
 
 iptables -F
 iptables -t nat -F
-
-iptables -A INPUT -i lo -j ACCEPT
-iptables -A OUTPUT -o lo -j ACCEPT
-
-echo "Allowing inbound traffic on ports 8001 and 1080..."
 iptables -A INPUT -p tcp --dport 8001 -j ACCEPT
 iptables -A INPUT -p tcp --dport 1080 -j ACCEPT
 iptables -A INPUT -p udp --dport 1080 -j ACCEPT
-
 iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
 iptables -A FORWARD -i eth0 -o tun0 -j ACCEPT
 iptables -A FORWARD -i tun0 -o eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 
 echo "NAT and Firewall configured."
 
-# --- HELPER: Write JSON State ---
-write_state() {
+# --- HELPER: Write JSON State (Root Only) ---
+write_state_root() {
     STATE="$1"
     URL="$2"
     TEXT="$3"
@@ -73,12 +66,13 @@ su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
 su - gpuser -c "python3 /var/www/html/server.py >> \"$LOG_FILE\" 2>&1 &"
 su - gpuser -c "/usr/bin/gpservice >> \"$LOG_FILE\" 2>&1 &"
 
-write_state "idle" "" "" "Waiting for user to click connect..."
+write_state_root "idle" "" "" "Waiting for user to click connect..."
 
 while true; do
     read _ < /tmp/gp-control
-    write_state "connecting" "" "" "Signal received, starting gpclient..."
+    write_state_root "connecting" "" "" "Signal received, starting gpclient..."
 
+    # We cannot use functions inside 'su', so we inline the JSON writing logic
     su - gpuser -c "
         export VPN_PORTAL=\"$VPN_PORTAL\"
         exec 3<> /tmp/gp-stdin
@@ -88,7 +82,7 @@ while true; do
         while true; do
             echo \"DEBUG: Launching gpclient...\" >> \"$DEBUG_LOG\"
 
-            # CHANGED: Added 'stdbuf -oL -eL' to force line buffering so logs appear instantly
+            # Use stdbuf to force line buffering
             CMD=\"stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote\"
             script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1 &
             CLIENT_PID=\$!
@@ -96,30 +90,53 @@ while true; do
             while kill -0 \$CLIENT_PID 2>/dev/null; do
                 # 1. Check for success
                 if grep -q \"Connected\" \"$LOG_FILE\"; then
-                    write_state \"connected\" \"\" \"\" \"VPN Established!\"
+                     cat <<JSON > $STATUS_FILE.tmp
+{ \"state\": \"connected\", \"log\": \"VPN Established Successfully!\" }
+JSON
+                     mv $STATUS_FILE.tmp $STATUS_FILE
 
-                # 2. Advanced URL Detection logic
+                # 2. Check for URL
                 else
-                    # CHANGED: Added debug logging to see what regex finds
                     FOUND_URL=\$(grep -oE \"https?://[0-9a-zA-Z./:-]+\" \"$LOG_FILE\" | grep -v \"prelogin.esp\" | tail -1)
 
                     if [ -n \"\$FOUND_URL\" ]; then
-                        # Clean the URL
                         CLEAN_URL=\$(echo \"\$FOUND_URL\" | tr -d '[:space:]' | sed 's/[\")\\\\\\\\\\\\]*\$//')
                         echo \"DEBUG: Found URL: \$CLEAN_URL\" >> \"$DEBUG_LOG\"
 
-                        LINK_TEXT=\"Open Login Page (SSO)\"
-                        write_state \"auth\" \"\$CLEAN_URL\" \"\$LINK_TEXT\" \"Captured URL from logs.\"
+                        # Escape quotes for JSON
+                        LOG_CONTENT=\$(tail -n 15 \"$LOG_FILE\" | awk '{printf \"%s\\\\\\\\n\", \$0}' | sed 's/\"/\\\\\\\\\"/g')
+
+                        cat <<JSON > $STATUS_FILE.tmp
+{
+  \"state\": \"auth\",
+  \"url\": \"\$CLEAN_URL\",
+  \"link_text\": \"Open Login Page (SSO)\",
+  \"debug\": \"Captured URL from logs\",
+  \"log\": \"\$LOG_CONTENT\"
+}
+JSON
+                        mv $STATUS_FILE.tmp $STATUS_FILE
                     else
-                        echo \"DEBUG: No URL found yet...\" >> \"$DEBUG_LOG\"
-                        write_state \"connecting\" \"\" \"\" \"Scanning logs for SSO URL...\"
+                        # Update Log View while connecting
+                        LOG_CONTENT=\$(tail -n 15 \"$LOG_FILE\" | awk '{printf \"%s\\\\\\\\n\", \$0}' | sed 's/\"/\\\\\\\\\"/g')
+                        cat <<JSON > $STATUS_FILE.tmp
+{
+  \"state\": \"connecting\",
+  \"debug\": \"Scanning for SSO URL...\",
+  \"log\": \"\$LOG_CONTENT\"
+}
+JSON
+                        mv $STATUS_FILE.tmp $STATUS_FILE
                     fi
                 fi
                 sleep 2
             done
 
             echo \"DEBUG: gpclient process died.\" >> \"$DEBUG_LOG\"
-            write_state \"idle\" \"\" \"\" \"Process exited. Check Logs.\"
+            cat <<JSON > $STATUS_FILE.tmp
+{ \"state\": \"idle\", \"log\": \"Process exited. Check Logs.\", \"debug\": \"Client died.\" }
+JSON
+            mv $STATUS_FILE.tmp $STATUS_FILE
             sleep 5
         done
     " &
