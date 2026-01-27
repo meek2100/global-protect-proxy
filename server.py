@@ -3,10 +3,10 @@ import socketserver
 import os
 import urllib.parse
 import sys
-import time
 import re
 import json
 import logging
+import shutil
 
 # --- Configuration ---
 PORT = 8001
@@ -28,13 +28,11 @@ def trace(self, message, *args, **kws):
 
 logging.Logger.trace = trace
 
-# Get Level from Env (Default INFO)
 env_level = os.getenv("LOG_LEVEL", "INFO").upper()
 log_level = getattr(logging, env_level, logging.INFO)
 if env_level == "TRACE":
     log_level = TRACE_LEVEL_NUM
 
-# Configure Logging: File AND Console (Dual Logging)
 handlers = [
     logging.FileHandler(DEBUG_LOG),
     logging.StreamHandler(sys.stderr),
@@ -56,8 +54,6 @@ def get_vpn_state():
     Combines coarse process state (MODE_FILE) with fine-grained log parsing.
     """
     state = "idle"
-
-    # 1. Check Coarse Mode
     if os.path.exists(MODE_FILE):
         try:
             with open(MODE_FILE, "r") as f:
@@ -70,7 +66,6 @@ def get_vpn_state():
     if state == "idle":
         return {"state": "idle", "log": "Ready to connect."}
 
-    # 2. Parse Logs for Fine-Grained State
     log_content = ""
     sso_url = ""
 
@@ -78,10 +73,8 @@ def get_vpn_state():
         try:
             with open(LOG_FILE, "r", errors="replace") as f:
                 lines = f.readlines()
-                # --- FIX: Increase scan window to 300 lines to catch URL amidst verbosity ---
                 log_content = "".join(lines[-300:])
 
-                # Scan for success
                 for line in reversed(lines):
                     if "Connected" in line:
                         state = "connected"
@@ -91,10 +84,8 @@ def get_vpn_state():
                             "log": "VPN Established Successfully!",
                         }
 
-                # --- FIX: Context Aware Parsing ---
-                # Check if we are in the 'Manual Authentication' phase
+                # Scan for Auth URL
                 is_manual_auth = "Manual Authentication Required" in log_content
-
                 url_pattern = re.compile(r'(https?://[^\s"<>]+)')
 
                 # Trace logging for parser logic (Only if LOG_LEVEL=TRACE)
@@ -103,7 +94,6 @@ def get_vpn_state():
                 for i, line in enumerate(reversed(lines)):
                     if "prelogin.esp" in line:
                         continue
-
                     match = url_pattern.search(line)
                     if match:
                         found_url = match.group(1)
@@ -147,9 +137,30 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-type", "application/json")
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
+            self.wfile.write(json.dumps(get_vpn_state()).encode("utf-8"))
+            return
 
-            data = get_vpn_state()
-            self.wfile.write(json.dumps(data).encode("utf-8"))
+        # --- NEW: Download Logs Endpoint ---
+        if self.path == "/download_logs":
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header(
+                    "Content-Disposition", "attachment; filename=vpn_full_debug.log"
+                )
+                self.end_headers()
+
+                self.wfile.write(b"=== SYSTEM DEBUG LOG (debug_parser.log) ===\n\n")
+                if os.path.exists(DEBUG_LOG):
+                    with open(DEBUG_LOG, "rb") as f:
+                        shutil.copyfileobj(f, self.wfile)
+
+                self.wfile.write(b"\n\n=== VPN CLIENT LOG (vpn.log) ===\n\n")
+                if os.path.exists(LOG_FILE):
+                    with open(LOG_FILE, "rb") as f:
+                        shutil.copyfileobj(f, self.wfile)
+            except Exception as e:
+                logger.error(f"Failed to download logs: {e}")
             return
 
         if self.path == "/":
@@ -162,7 +173,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 logger.info("Received /connect signal via Web UI")
                 with open(FIFO_CONTROL, "w") as f:
                     f.write("START\n")
-
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(b"OK")
@@ -176,7 +186,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 content_length = int(self.headers.get("Content-Length", 0))
                 post_data = self.rfile.read(content_length).decode("utf-8")
                 parsed_data = urllib.parse.parse_qs(post_data)
-
                 if "callback_url" in parsed_data:
                     raw_input = parsed_data["callback_url"][0].strip()
                     logger.info(f"User submitted callback. Length: {len(raw_input)}")
@@ -185,7 +194,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     with open(FIFO_STDIN, "w") as fifo:
                         fifo.write(raw_input + "\n")
                         fifo.flush()
-
                     self.send_response(200)
                     self.send_header("Content-type", "text/html")
                     self.end_headers()
@@ -208,7 +216,6 @@ if __name__ == "__main__":
     if not os.path.exists(FIFO_CONTROL):
         os.mkfifo(FIFO_CONTROL)
         os.chmod(FIFO_CONTROL, 0o666)
-
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
         httpd.serve_forever()

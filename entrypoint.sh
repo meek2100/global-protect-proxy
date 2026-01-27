@@ -30,8 +30,7 @@ log() {
     esac
 
     if [ "$should_log" = true ]; then
-        local timestamp
-        timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+        local timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
         local log_entry="[$timestamp] [$level] $msg"
         echo "$log_entry" >> "$DEBUG_LOG"
         echo "$log_entry" >&2
@@ -43,7 +42,6 @@ log "INFO" "Entrypoint started. Level: $LOG_LEVEL, Mode: $VPN_MODE"
 # --- 1. USER IDENTITY DETECTION ---
 if [ -n "$PUID" ]; then usermod -u "$PUID" gpuser; fi
 if [ -n "$PGID" ]; then groupmod -g "$PGID" gpuser; fi
-
 
 # --- 2. NETWORK & MODE DETECTION ---
 log "INFO" "Inspecting network environment..."
@@ -127,13 +125,9 @@ log "INFO" "Initializing Environment..."
 
 rm -f "$PIPE_STDIN" "$PIPE_CONTROL" "$MODE_FILE"
 mkfifo "$PIPE_STDIN" "$PIPE_CONTROL"
-
 mkdir -p /tmp/gp-logs
 touch "$LOG_FILE" "$DEBUG_LOG"
-
-# IMPORTANT: Grant ownership to gpuser
 chown -R gpuser:gpuser /tmp/gp-logs /var/www/html "$PIPE_STDIN" "$PIPE_CONTROL"
-
 echo "idle" > "$MODE_FILE"
 chmod 644 "$MODE_FILE"
 
@@ -160,29 +154,28 @@ su - gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 /var/www/html/server.py >
 # --- 7. MAIN CONTROL LOOP ---
 while true; do
     log "DEBUG" "Waiting for start signal..."
-
-    # Block until signal received
     read _ < "$PIPE_CONTROL"
 
     log "INFO" "Signal received. Starting gpclient..."
     echo "active" > "$MODE_FILE"
 
-    # Run gpclient as gpuser
     su - gpuser -c "
         export VPN_PORTAL=\"$VPN_PORTAL\"
         > \"$LOG_FILE\"
-
-        # Open pipe in Read+Write mode (FD 3) to prevent blocking
         exec 3<> \"$PIPE_STDIN\"
 
-        echo \"[Entrypoint Subshell] Launching gpclient binary...\" >> \"$DEBUG_LOG\"
+        echo \"[Entrypoint Subshell] Launching gpclient binary with script wrapper...\" >> \"$DEBUG_LOG\"
 
-        # Run gpclient using FD 3 as input
-        stdbuf -oL -eL gpclient --fix-openssl connect \"\$VPN_PORTAL\" --browser remote <&3 >> \"$LOG_FILE\" 2>&1
+        # --- FIX: Use 'script' to emulate TTY ---
+        # 1. 'stdbuf -oL -eL': Forces line buffering so logs appear instantly.
+        # 2. 'script -q -c ... /dev/null': Creates a fake TTY so gpclient doesn't crash.
+        # 3. '<&3': Feeds our named pipe into the fake TTY.
+
+        CMD=\"stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote\"
+        script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1
     "
 
     log "WARN" "gpclient process exited."
     echo "idle" > "$MODE_FILE"
-
     sleep 2
 done

@@ -138,7 +138,6 @@
             display: none !important;
         }
 
-        /* Spinner */
         .spinner {
             border: 4px solid #f3f3f3;
             border-top: 4px solid #3498db;
@@ -162,7 +161,6 @@
 </head>
 
 <body>
-
     <div class="card">
         <h1>GlobalProtect VPN</h1>
         <div id="status-badge" class="status-badge status-idle">Loading...</div>
@@ -180,18 +178,14 @@
 
         <div id="view-auth" class="hidden">
             <h3>Authentication Required</h3>
-
             <div class="instruction-box">
                 <strong>Step 1:</strong> Click the button below to log in via SSO.<br>
                 <strong>Step 2:</strong> If your browser tries to launch "GlobalProtect", ignore or cancel it.<br>
                 <strong>Step 3:</strong> Copy the entire URL from the address bar (it may start with
                 <code>globalprotect://</code>) and paste it below.
             </div>
-
             <a id="sso-link" href="#" target="_blank" class="btn btn-success">Open Login Page</a>
-
             <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
-
             <form action="/submit" method="POST">
                 <label for="cb_url" style="display:block; text-align:left; margin-bottom:5px; font-weight:bold;">Paste
                     URL here:</label>
@@ -207,8 +201,10 @@
             <p>SOCKS5 Proxy: <code>192.168.1.155:1080</code></p>
         </div>
 
-        <div style="margin-top:20px;">
+        <div style="margin-top:20px; display: flex; justify-content: space-between; align-items: center;">
             <a href="#" onclick="toggleDebug(); return false;" style="font-size:12px; color:#999;">Toggle Logs</a>
+            <a href="/download_logs" style="font-size:12px; color:#007bff; text-decoration: none;">Download Full Logs
+                ⬇</a>
         </div>
         <div id="debug-box"></div>
     </div>
@@ -217,66 +213,42 @@
         async function triggerConnect() {
             document.getElementById('status-badge').innerText = "STARTING...";
             await fetch('/connect', { method: 'POST' });
-            // UI will update on next poll
         }
-
         function toggleDebug() {
             const d = document.getElementById('debug-box');
             d.style.display = (d.style.display === 'none' || d.style.display === '') ? 'block' : 'none';
         }
-
         async function updateStatus() {
             const debug = document.getElementById('debug-box');
             try {
-                // Fetch JSON with cache busting
                 const response = await fetch('/status.json?t=' + Date.now());
-
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
                 const data = await response.json();
 
-                // update Badge
                 const badge = document.getElementById('status-badge');
                 badge.className = `status-badge status-${data.state}`;
                 badge.innerText = data.state.toUpperCase();
 
-                // Hide all views
                 ['idle', 'connecting', 'auth', 'connected'].forEach(id => {
-                    const el = document.getElementById(`view-${id}`);
-                    if (el) el.classList.add('hidden');
+                    document.getElementById(`view-${id}`).classList.add('hidden');
                 });
+                document.getElementById(`view-${data.state}`).classList.remove('hidden');
 
-                // Show current view
-                const view = document.getElementById(`view-${data.state}`);
-                if (view) view.classList.remove('hidden');
-
-                // Update Auth Link if needed
                 if (data.state === 'auth' && data.url) {
                     const link = document.getElementById('sso-link');
-                    // Prevent refreshing the link if it hasn't changed (to avoid UI flicker)
-                    if (link.getAttribute('href') !== data.url) {
-                        link.href = data.url;
-                    }
+                    if (link.getAttribute('href') !== data.url) link.href = data.url;
                 }
-
-                // Update Log
                 if (data.log) {
                     debug.innerText = `--- SERVER DEBUG INFO ---\n${data.debug || ''}\n\n--- VPN LOGS ---\n${data.log}`;
                 }
-
             } catch (e) {
                 console.error("Poll failed", e);
-                // Don't overwrite the UI immediately on one failed poll,
-                // but log to debug box if visible
                 debug.innerText = `Connection Error: ${e.message}`;
             }
         }
-
-        // Poll every 1.5 seconds
         setInterval(updateStatus, 1500);
         updateStatus();
     </script>
-
 </body>
 
 </html>
