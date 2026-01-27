@@ -108,14 +108,12 @@ write_state "connecting" "" ""
 echo "State: CONNECTING..."
 
 # 3. Connection Loop
-# We verify the variable exists in ROOT context first
 if [ -z "$VPN_PORTAL" ]; then
     echo "ERROR: VPN_PORTAL environment variable is not set!" >> "$LOG_FILE"
 fi
 
 su - gpuser -c "
-    # --- FIX: INJECT VARIABLE INTO USER SESSION ---
-    # The outer shell expands \$VPN_PORTAL, passing the value into the inner scope
+    # Pass env var to user session
     export VPN_PORTAL=\"$VPN_PORTAL\"
 
     exec 3<> /tmp/gp-stdin
@@ -124,9 +122,7 @@ su - gpuser -c "
     while true; do
         echo \"Attempting connection to \$VPN_PORTAL...\" >> \"$LOG_FILE\"
 
-        # Now \$VPN_PORTAL will actually contain the URL
         CMD=\"gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote\"
-
         script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1 &
         CLIENT_PID=\$!
 
@@ -136,21 +132,30 @@ su - gpuser -c "
 { \"state\": \"connected\", \"log\": \"VPN Connected Successfully\" }
 JSON
                 mv $STATUS_FILE.tmp $STATUS_FILE
-            elif grep -qE \"https?://.*/.*\" \"$LOG_FILE\"; then
-                 LOCAL_URL=\$(grep -oE \"https?://[^ ]+\" \"$LOG_FILE\" | tail -1)
+
+            # CHECK FOR URL (Ignoring prelogin.esp)
+            elif grep -oE \"https?://[^ ]+\" \"$LOG_FILE\" | grep -v \"prelogin.esp\" | grep -q \"http\"; then
+
+                 # 1. Extract the raw dirty URL (might have parens/quotes)
+                 LOCAL_URL=\$(grep -oE \"https?://[^ ]+\" \"$LOG_FILE\" | grep -v \"prelogin.esp\" | tail -1)
+
+                 # 2. Clean it safely using Python arguments (No syntax errors!)
                  REAL_URL=\$(export http_proxy=; export https_proxy=; python3 -c \"
-import urllib.request, sys
+import sys
 try:
-    url = '\$LOCAL_URL'
-    print(f'DEBUG: Found URL {url}', file=sys.stderr)
-    print(url)
-except Exception as e:
-    print(f'DEBUG_ERROR: {e}', file=sys.stderr)
-\" 2>> \"$LOG_FILE\")
+    if len(sys.argv) > 1:
+        # Strip trailing punctuation: ) . \\\" '
+        url = sys.argv[1].rstrip(').\\\",\\'')
+        print(url)
+except:
+    pass
+\" \"\$LOCAL_URL\")
+
                  if [ -z \"\$REAL_URL\" ]; then REAL_URL=\"\$LOCAL_URL\"; fi
 
                  LINK_TEXT=\"Open Login Page (SSO)\"
                  LOG_CONTENT=\$(tail -n 20 \"$LOG_FILE\" | awk '{printf \"%s\\\\n\", \$0}' | sed 's/\"/\\\\\"/g')
+
                  cat <<JSON > $STATUS_FILE.tmp
 {
   \"state\": \"auth\",
