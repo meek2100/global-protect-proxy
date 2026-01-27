@@ -47,6 +47,7 @@ write_state() {
     TEXT="$3"
     SAFE_URL=$(echo "$URL" | sed 's/"/\\"/g')
     SAFE_TEXT=$(echo "$TEXT" | sed 's/"/\\"/g')
+    # Escape backslashes for JSON compatibility
     LOG_CONTENT=$(tail -n 20 "$LOG_FILE" 2>/dev/null | awk '{printf "%s\\n", $0}' | sed 's/"/\\"/g')
     cat <<JSON > "$STATUS_FILE.tmp"
 {
@@ -96,61 +97,70 @@ tail -f "$LOG_FILE" &
 write_state "idle" "" ""
 echo "State: IDLE. Waiting for user..."
 
-read _ < /tmp/gp-control
+# --- MAIN LOOP ---
+while true; do
+    # 2. WAIT FOR USER SIGNAL FROM WEB UI
+    read _ < /tmp/gp-control
 
-write_state "connecting" "" ""
-echo "State: CONNECTING..."
+    write_state "connecting" "" ""
+    echo "State: CONNECTING..."
 
-if [ -z "$VPN_PORTAL" ]; then
-    echo "ERROR: VPN_PORTAL environment variable is not set!" >> "$LOG_FILE"
-fi
+    if [ -z "$VPN_PORTAL" ]; then
+        echo "ERROR: VPN_PORTAL environment variable is not set!" >> "$LOG_FILE"
+    fi
 
-su - gpuser -c "
-    export VPN_PORTAL=\"$VPN_PORTAL\"
-    exec 3<> /tmp/gp-stdin
-    > \"$LOG_FILE\"
+    su - gpuser -c "
+        export VPN_PORTAL=\"$VPN_PORTAL\"
+        exec 3<> /tmp/gp-stdin
+        > \"$LOG_FILE\"
 
-    while true; do
-        echo \"Attempting connection to \$VPN_PORTAL...\" >> \"$LOG_FILE\"
+        while true; do
+            echo \"Attempting connection to \$VPN_PORTAL...\" >> \"$LOG_FILE\"
 
-        CMD=\"gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote\"
-        script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1 &
-        CLIENT_PID=\$!
+            CMD=\"gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote\"
+            script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1 &
+            CLIENT_PID=\$!
 
-        while kill -0 \$CLIENT_PID 2>/dev/null; do
-            if grep -q \"Connected\" \"$LOG_FILE\"; then
-                cat <<JSON > $STATUS_FILE.tmp
+            while kill -0 \$CLIENT_PID 2>/dev/null; do
+                if grep -q \"Connected\" \"$LOG_FILE\"; then
+                    # Manually update state to connected
+                    cat <<JSON > $STATUS_FILE.tmp
 { \"state\": \"connected\", \"log\": \"VPN Connected Successfully\" }
 JSON
-                mv $STATUS_FILE.tmp $STATUS_FILE
+                    mv $STATUS_FILE.tmp $STATUS_FILE
 
-            # Updated logic to catch http (local auth) and https (SSO) URLs
-            elif grep -oE \"https?://[0-9a-zA-Z./:-]+\" \"$LOG_FILE\" | grep -v \"prelogin.esp\" | grep -q \"http\"; then
+                # NEW REGEX: Matches both http/https and includes port numbers and hyphens
+                elif grep -oE \"https?://[0-9a-zA-Z./:-]+\" \"$LOG_FILE\" | grep -v \"prelogin.esp\" | grep -q \"http\"; then
 
-                 LOCAL_URL=\$(grep -oE \"https?://[0-9a-zA-Z./:-]+\" \"$LOG_FILE\" | grep -v \"prelogin.esp\" | tail -1)
+                     RAW_URL=\$(grep -oE \"https?://[0-9a-zA-Z./:-]+\" \"$LOG_FILE\" | grep -v \"prelogin.esp\" | tail -1)
 
-                 # Clean trailing spaces or punctuation from the log line
-                 REAL_URL=\$(echo \"\$LOCAL_URL\" | tr -d '[:space:]' | sed 's/[\")\\\\\\\\]*\$//')
+                     # Clean any trailing punctuation or terminal artifacts
+                     CLEAN_URL=\$(echo \"\$RAW_URL\" | tr -d '[:space:]' | sed 's/[\")\\\\\\\\\\\\]*\$//')
 
-                 if [ -n \"\$REAL_URL\" ]; then
-                     LINK_TEXT=\"Open Login Page (SSO)\"
-                     LOG_CONTENT=\$(tail -n 20 \"$LOG_FILE\" | awk '{printf \"%s\\\\\\\\n\", \$0}' | sed 's/\"/\\\\\\\\\"/g')
+                     if [ -n \"\$CLEAN_URL\" ]; then
+                         LINK_TEXT=\"Open Login Page (SSO)\"
+                         LOG_CONTENT=\$(tail -n 20 \"$LOG_FILE\" | awk '{printf \"%s\\\\\\\\\\\\\\\\n\", \$0}' | sed 's/\"/\\\\\\\\\\\\\\\\\"/g')
 
-                     cat <<JSON > $STATUS_FILE.tmp
+                         cat <<JSON > $STATUS_FILE.tmp
 {
   \"state\": \"auth\",
-  \"url\": \"\$REAL_URL\",
+  \"url\": \"\$CLEAN_URL\",
   \"link_text\": \"\$LINK_TEXT\",
   \"log\": \"\$LOG_CONTENT\"
 }
 JSON
-                     mv $STATUS_FILE.tmp $STATUS_FILE
-                 fi
-            fi
-            sleep 1
-        done
-        sleep 5
-    done
-" &
+                         mv $STATUS_FILE.tmp $STATUS_FILE
+                     fi
+                fi
+                sleep 1
+            done
 
-wait
+            # If client dies, notify UI and wait before retry
+            cat <<JSON > $STATUS_FILE.tmp
+{ \"state\": \"idle\", \"log\": \"Connection lost or failed. Re-click Connect.\" }
+JSON
+            mv $STATUS_FILE.tmp $STATUS_FILE
+            sleep 5
+        done
+    " &
+done
