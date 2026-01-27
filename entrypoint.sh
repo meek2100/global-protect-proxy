@@ -9,8 +9,9 @@ PIPE_STDIN="/tmp/gp-stdin"
 PIPE_CONTROL="/tmp/gp-control"
 
 # Defaults
-: "${LOG_LEVEL:=INFO}"   # Options: INFO, DEBUG, TRACE
-: "${VPN_MODE:=standard}" # Options: standard, socks, gateway
+: "${LOG_LEVEL:=INFO}"      # Options: INFO, DEBUG, TRACE
+: "${VPN_MODE:=standard}"   # Options: standard, socks, gateway
+: "${DNS_SERVERS:=}"        # Optional: Comma or space separated IPs (e.g. "8.8.8.8,1.1.1.1")
 
 # --- LOGGING HELPER ---
 declare -A LOG_PRIORITY
@@ -32,29 +33,72 @@ log() {
         local timestamp
         timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
         local log_entry="[$timestamp] [$level] $msg"
-
-        # 1. Write to internal file (For the Web UI)
         echo "$log_entry" >> "$DEBUG_LOG"
-
-        # 2. Write to Container StdErr (For Docker Logs/You)
-        # We use >&2 (stderr) so it appears in 'docker logs' immediately.
         echo "$log_entry" >&2
     fi
 }
 
 log "INFO" "Entrypoint started. Level: $LOG_LEVEL, Mode: $VPN_MODE"
 
-# --- 1. DNS FIX FOR MACVLAN/PORTAINER ---
-echo "Force-updating /etc/resolv.conf..."
-cat > /etc/resolv.conf <<EOF
-nameserver 8.8.8.8
-nameserver 1.1.1.1
-options ndots:0
-EOF
+# --- 1. NETWORK & MODE DETECTION ---
+log "INFO" "Inspecting network environment..."
 
-# --- 2. NETWORK SETUP (Root) ---
+# Detect if eth0 is a macvlan interface
+IS_MACVLAN=false
+if ip -d link show eth0 | grep -q "macvlan"; then
+    IS_MACVLAN=true
+    log "DEBUG" "Network detection: MACVLAN interface detected."
+else
+    log "DEBUG" "Network detection: Standard/Bridge interface detected."
+fi
+
+# --- AUTO-REVERT LOGIC ---
+if [ "$VPN_MODE" == "gateway" ] || [ "$VPN_MODE" == "standard" ]; then
+    if [ "$IS_MACVLAN" = false ]; then
+        log "WARN" "Configuration Mismatch: '$VPN_MODE' mode requested but no Macvlan interface found."
+        log "WARN" "Gateway features require a direct routable IP (Macvlan)."
+        log "WARN" ">>> REVERTING TO 'socks' MODE to ensure functionality. <<<"
+        VPN_MODE="socks"
+    fi
+fi
+
+log "INFO" "Final Operational Mode: $VPN_MODE"
+
+# --- 2. DNS CONFIGURATION ---
+# Logic:
+# 1. If DNS_SERVERS provided -> Always apply.
+# 2. Else if Macvlan -> Apply Fallback (8.8.8.8).
+# 3. Else -> Do nothing (Use Docker DNS).
+
+DNS_TO_APPLY=""
+
+if [ -n "$DNS_SERVERS" ]; then
+    log "INFO" "Custom DNS configuration found: $DNS_SERVERS"
+    # Replace commas with spaces for iteration
+    DNS_TO_APPLY=$(echo "$DNS_SERVERS" | tr ',' ' ')
+elif [ "$IS_MACVLAN" = true ]; then
+    log "INFO" "Macvlan detected without custom DNS. Applying fallback defaults (Google/Cloudflare) to fix resolution."
+    DNS_TO_APPLY="8.8.8.8 1.1.1.1"
+fi
+
+if [ -n "$DNS_TO_APPLY" ]; then
+    log "INFO" "Overwriting /etc/resolv.conf with: $DNS_TO_APPLY"
+
+    # Write safe options first
+    echo "options ndots:0" > /etc/resolv.conf
+
+    # Loop through IPs and append nameserver lines
+    for ip in $DNS_TO_APPLY; do
+        echo "nameserver $ip" >> /etc/resolv.conf
+    done
+else
+    log "INFO" "Using System/Docker DNS settings (No override)."
+fi
+
+# --- 3. NETWORK SETUP (Root) ---
 log "INFO" "Configuring Networking..."
 
+# Enable IP Forwarding (Only needed for Gateway/Standard)
 if [ "$VPN_MODE" = "gateway" ] || [ "$VPN_MODE" = "standard" ]; then
     if [ "$(cat /proc/sys/net/ipv4/ip_forward)" = "1" ]; then
         log "DEBUG" "IP Forwarding is already enabled."
@@ -62,7 +106,7 @@ if [ "$VPN_MODE" = "gateway" ] || [ "$VPN_MODE" = "standard" ]; then
         echo 1 > /proc/sys/net/ipv4/ip_forward || log "ERROR" "Could not write to ip_forward."
     fi
 else
-    log "INFO" "Mode is '$VPN_MODE' - Skipping IP Forwarding enablement."
+    log "DEBUG" "Skipping IP Forwarding (Not required for SOCKS)."
 fi
 
 # Reset Firewall
@@ -72,24 +116,25 @@ iptables -t nat -F
 # Allow Local Access
 iptables -A INPUT -p tcp --dport 8001 -j ACCEPT
 
+# Allow Proxy Ports (SOCKS Mode)
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
     iptables -A INPUT -p tcp --dport 1080 -j ACCEPT
     iptables -A INPUT -p udp --dport 1080 -j ACCEPT
 fi
 
-# NAT Routing
+# NAT Routing (Gateway/Standard Mode)
 if [ "$VPN_MODE" = "gateway" ] || [ "$VPN_MODE" = "standard" ]; then
     log "INFO" "Applying NAT (Masquerade) rules..."
     iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
     iptables -A FORWARD -i eth0 -o tun0 -j ACCEPT
     iptables -A FORWARD -i tun0 -o eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 else
-    log "INFO" "Skipping NAT rules (Mode: $VPN_MODE)"
+    log "DEBUG" "Skipping NAT rules."
 fi
 
 log "INFO" "Network setup complete."
 
-# --- 3. INIT ENVIRONMENT ---
+# --- 4. INIT ENVIRONMENT ---
 log "INFO" "Initializing Environment..."
 
 # Cleanup old pipes/files
@@ -102,12 +147,11 @@ mkdir -p /tmp/gp-logs
 touch "$LOG_FILE" "$DEBUG_LOG"
 chown -R gpuser:gpuser /tmp/gp-logs /var/www/html
 
-# Initialize Mode
-# Root owns it (writer), gpuser reads it.
+# Initialize Mode file (Writable by root, readable by gpuser)
 echo "idle" > "$MODE_FILE"
 chmod 644 "$MODE_FILE"
 
-# --- 4. START SERVICES ---
+# --- 5. START SERVICES ---
 log "INFO" "Starting Services..."
 
 # 1. Microsocks
@@ -122,7 +166,7 @@ fi
 log "INFO" "Starting Python Control Server..."
 su - gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
 
-# --- 5. MAIN CONTROL LOOP ---
+# --- 6. MAIN CONTROL LOOP ---
 while true; do
     log "DEBUG" "Waiting for start signal..."
 

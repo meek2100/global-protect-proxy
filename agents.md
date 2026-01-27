@@ -19,11 +19,18 @@ The system uses a "Split Brain" architecture for stability:
 
 ## Environment Variables
 
-| Variable     | Default      | Description                                                                                      |
-| :----------- | :----------- | :----------------------------------------------------------------------------------------------- |
-| `VPN_PORTAL` | **Required** | The URL of your GlobalProtect portal.                                                            |
-| `LOG_LEVEL`  | `INFO`       | Controls verbosity. Options: `TRACE` (Granular), `DEBUG` (Process flow), `INFO` (State changes). |
-| `VPN_MODE`   | `standard`   | Controls functionality. Options: `standard`, `socks`, `gateway`.                                 |
+| Variable      | Default      | Description                                                                                                              |
+| :------------ | :----------- | :----------------------------------------------------------------------------------------------------------------------- |
+| `VPN_PORTAL`  | **Required** | The URL of your GlobalProtect portal.                                                                                    |
+| `LOG_LEVEL`   | `INFO`       | Controls verbosity. Options: `TRACE` (Granular), `DEBUG` (Process flow), `INFO` (State changes).                         |
+| `VPN_MODE`    | `standard`   | Controls functionality. Options: `standard`, `socks`, `gateway`.                                                         |
+| `DNS_SERVERS` | `(Empty)`    | **Overrides DNS settings.** Provide comma-separated IPs (e.g., `10.0.0.5,1.1.1.1`). Forces update of `/etc/resolv.conf`. |
+
+### DNS Behavior
+
+- **Custom (`DNS_SERVERS` set):** Always overwrites `/etc/resolv.conf` with provided values. Use this if Docker DNS is failing or if you need internal DNS resolution over the VPN.
+- **Macvlan Auto-Fix:** If `DNS_SERVERS` is empty but `macvlan` is detected, defaults to `8.8.8.8, 1.1.1.1` to bypass common Docker isolation issues.
+- **Default:** Uses system/Docker DNS settings.
 
 ### Operational Modes (`VPN_MODE`)
 
@@ -33,7 +40,7 @@ The system uses a "Split Brain" architecture for stability:
 
 ## Key Files
 
-- **`entrypoint.sh`:** Handles `VPN_MODE` logic and network setup.
+- **`entrypoint.sh`:** Handles `VPN_MODE` logic, DNS configuration, and network setup.
 - **`server.py`:** Handles `LOG_LEVEL` parsing and log analysis.
 - **`debug_parser.log`:** The primary debug artifact. Both Bash and Python write here.
 
