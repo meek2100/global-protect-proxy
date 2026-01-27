@@ -105,6 +105,24 @@
             background-color: #218838;
         }
 
+        .btn-warning {
+            background-color: #ffc107;
+            color: #212529;
+        }
+
+        /* New Warning Style */
+        .btn-warning:hover {
+            background-color: #e0a800;
+        }
+
+        /* Disabled State for the Link */
+        .btn-disabled {
+            background-color: #6c757d !important;
+            cursor: not-allowed;
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
         input[type="text"],
         input[type="password"],
         select {
@@ -189,15 +207,21 @@
             <h3>Authentication Required</h3>
             <div class="instruction-box">
                 <strong>Step 1:</strong> Click the button below to log in via SSO.<br>
-                <strong>Step 2:</strong> After login, copy the callback URL (starts with
-                <code>globalprotectcallback:</code>).<br>
-                <strong>Step 3:</strong> Paste it below.
+                <strong>Step 2:</strong> On the "Authentication Complete" page, look for the text "click here to launch
+                GlobalProtect".<br>
+                <strong>Step 3:</strong> Right-click that link, choose <b>"Copy Link Address"</b>, and paste it below.
             </div>
-            <a id="sso-link" href="#" target="_blank" class="btn btn-success">Open Login Page</a>
+
+            <a id="sso-link" href="#" target="_blank" class="btn btn-success" onclick="handleLinkClick(this)">Open Login
+                Page</a>
+
+            <button id="restart-btn" onclick="triggerConnect()" class="btn btn-warning hidden">⚠️ Link Expired? Start
+                Over</button>
+
             <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
             <form action="/submit" method="POST" id="auth-form">
-                <input type="text" id="cb_url" name="callback_url" placeholder="Or paste manually here..." required
-                    autocomplete="off">
+                <input type="text" id="cb_url" name="callback_url"
+                    placeholder="Paste globalprotectcallback:// link here..." required autocomplete="off">
                 <button type="submit" class="btn btn-primary">Submit Code</button>
             </form>
         </div>
@@ -239,9 +263,29 @@
 
         async function triggerConnect() {
             document.getElementById('status-badge').innerText = "STARTING...";
-            // Reset views to avoid confusion while request processes
             document.getElementById('view-error').classList.add('hidden');
+
+            // RESET AUTH UI: Re-enable the link for the next attempt
+            const link = document.getElementById('sso-link');
+            if (link) {
+                link.classList.remove('btn-disabled');
+                link.innerText = "Open Login Page";
+                // We don't remove pointer-events via class strictly, we rely on the class removal
+                link.style.pointerEvents = '';
+                link.style.opacity = '';
+            }
+            document.getElementById('restart-btn').classList.add('hidden');
+
             await fetch('/connect', { method: 'POST' });
+        }
+
+        function handleLinkClick(el) {
+            // 1. Disable the button immediately
+            el.classList.add('btn-disabled');
+            el.innerText = "Link Opened (Single Use)";
+
+            // 2. Reveal the Restart button
+            document.getElementById('restart-btn').classList.remove('hidden');
         }
 
         function toggleDebug() {
@@ -254,7 +298,6 @@
                 const response = await fetch('/status.json?t=' + Date.now());
                 const data = await response.json();
 
-                // 1. State Management
                 if (window.currentVpnState !== data.state) {
                     ['idle', 'connecting', 'auth', 'input', 'connected', 'error'].forEach(id => {
                         const el = document.getElementById(`view-${id}`);
@@ -270,10 +313,12 @@
                     window.currentVpnState = data.state;
                 }
 
-                // 2. Dynamic View Updates
                 if (data.state === 'auth' && data.url) {
                     const link = document.getElementById('sso-link');
-                    if (link.getAttribute('href') !== data.url) link.href = data.url;
+                    // Only update href if not disabled to prevent weird loops
+                    if (!link.classList.contains('btn-disabled') && link.getAttribute('href') !== data.url) {
+                        link.href = data.url;
+                    }
                 }
 
                 if (data.state === 'error') {
@@ -284,7 +329,6 @@
                     document.getElementById('input-prompt').innerText = data.prompt;
                     const container = document.getElementById('dynamic-input-container');
 
-                    // Only rebuild input if empty to prevent focus loss
                     if (!container.innerHTML) {
                         let html = '';
                         if (data.input_type === 'select' && data.options && data.options.length > 0) {
@@ -300,9 +344,8 @@
                     }
                 }
 
-                // 3. LOGGING FIX (The Missing Link)
                 if (data.log) {
-                    const debugBox = document.getElementById('debug-box'); // Explicitly find the element
+                    const debugBox = document.getElementById('debug-box');
                     debugBox.innerText = `--- SERVER DECISION ---\n${data.debug || ''}\n\n--- VPN LOGS ---\n${data.log}`;
                 }
 
