@@ -128,7 +128,22 @@ rm -f "$PIPE_STDIN" "$PIPE_CONTROL" "$MODE_FILE"
 mkfifo "$PIPE_STDIN" "$PIPE_CONTROL"
 mkdir -p /tmp/gp-logs
 touch "$LOG_FILE" "$DEBUG_LOG"
-chown -R gpuser:gpuser /tmp/gp-logs /var/www/html "$PIPE_STDIN" "$PIPE_CONTROL"
+
+# Fix 1: Ensure gpuser can write to vpnc runtime directory
+mkdir -p /var/run/vpnc
+chown -R gpuser:gpuser /var/run/vpnc /tmp/gp-logs /var/www/html "$PIPE_STDIN" "$PIPE_CONTROL"
+
+# Fix 2: Grant Network Capabilities to the binaries
+# This allows gpclient to modify tun0 without being root.
+if [ -f /usr/bin/gpclient ]; then
+    setcap 'cap_net_admin+ep' /usr/bin/gpclient
+fi
+if [ -f /usr/bin/gpservice ]; then
+    setcap 'cap_net_admin+ep' /usr/bin/gpservice
+fi
+
+# Set permissions so both Root and gpuser can read/write logs & pipes
+
 echo "idle" > "$MODE_FILE"
 chmod 644 "$MODE_FILE"
 
