@@ -121,7 +121,7 @@ fi
 
 log "INFO" "Network setup complete."
 
-# --- 5. INIT ENVIRONMENT ---
+# --- 5. INIT ENVIRONMENT & PERMISSIONS ---
 log "INFO" "Initializing Environment..."
 
 rm -f "$PIPE_STDIN" "$PIPE_CONTROL" "$MODE_FILE"
@@ -129,7 +129,20 @@ mkfifo "$PIPE_STDIN" "$PIPE_CONTROL"
 mkdir -p /tmp/gp-logs
 touch "$LOG_FILE" "$DEBUG_LOG"
 
-# IMPORTANT: chmod 666 allows both root (VPN) and gpuser (Web) to read/write these files
+# Fix 1: Ensure gpuser can write to vpnc runtime directory
+mkdir -p /var/run/vpnc
+chown -R gpuser:gpuser /var/run/vpnc
+
+# Fix 2: Grant Network Capabilities to the binaries
+# This allows gpclient to modify tun0 without being root.
+if [ -f /usr/bin/gpclient ]; then
+    setcap 'cap_net_admin+ep' /usr/bin/gpclient
+fi
+if [ -f /usr/bin/gpservice ]; then
+    setcap 'cap_net_admin+ep' /usr/bin/gpservice
+fi
+
+# Set permissions so both Root and gpuser can read/write logs & pipes
 chmod 666 "$PIPE_STDIN" "$PIPE_CONTROL" "$LOG_FILE" "$DEBUG_LOG"
 chown -R gpuser:gpuser /tmp/gp-logs /var/www/html
 echo "idle" > "$MODE_FILE"
@@ -138,8 +151,9 @@ chmod 666 "$MODE_FILE"
 # --- 6. START SERVICES ---
 log "INFO" "Starting Services..."
 
-# 1. Start gpservice (Running as ROOT to avoid permission issues)
-# We append to DEBUG_LOG so if it crashes, we see why.
+# 1. Start gpservice (Running as ROOT is usually safer for system dbus interaction,
+#    but with setcap it *might* work as user. We stick to root for the service daemon
+#    to avoid dbus permission issues, as it doesn't have the anti-root check).
 log "INFO" "Starting GlobalProtect Service (gpservice)..."
 /usr/bin/gpservice >> "$DEBUG_LOG" 2>&1 &
 
@@ -163,22 +177,27 @@ while true; do
     log "INFO" "Signal received. Starting gpclient..."
     echo "active" > "$MODE_FILE"
 
-    # Running gpclient as ROOT to ensure it can modify tun0
+    # Fix 3: Run gpclient as gpuser (Avoiding the anti-root check)
+    # The setcap command above ensures it still has permission to create tun0.
 
     # Clear log for new run
     > "$LOG_FILE"
+    chown gpuser:gpuser "$LOG_FILE" # Ensure user owns the log file
 
-    # Connect PIPE_STDIN to File Descriptor 3
-    exec 3<> "$PIPE_STDIN"
+    # Executing as gpuser
+    su - gpuser -c "
+        export VPN_PORTAL=\"$VPN_PORTAL\"
+        export GP_ARGS=\"$GP_ARGS\"
 
-    # Launch gpclient with the PORTAL and the dynamic ARGS
-    CMD="stdbuf -oL -eL gpclient --fix-openssl connect \"$VPN_PORTAL\" --browser remote $GP_ARGS"
+        exec 3<> \"$PIPE_STDIN\"
 
-    # Log the command being run for debug purposes
-    echo "[Entrypoint] Running: $CMD" >> "$DEBUG_LOG"
+        # Launch gpclient with the PORTAL and the dynamic ARGS
+        CMD=\"stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
 
-    # Run script using the pipe connected to FD 3
-    script -q -c "$CMD" /dev/null <&3 >> "$LOG_FILE" 2>&1
+        echo \"[Entrypoint Subshell] Launching: \$CMD\" >> \"$DEBUG_LOG\"
+
+        script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1
+    "
 
     log "WARN" "gpclient process exited."
     echo "idle" > "$MODE_FILE"
