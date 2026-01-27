@@ -17,7 +17,6 @@ MODE_FILE = "/tmp/gp-mode"
 DEBUG_LOG = "/tmp/gp-logs/debug_parser.log"
 
 # --- Logging Setup ---
-# Define TRACE level (lower than DEBUG)
 TRACE_LEVEL_NUM = 5
 logging.addLevelName(TRACE_LEVEL_NUM, "TRACE")
 
@@ -37,8 +36,8 @@ if env_level == "TRACE":
 
 # Configure Logging: File AND Console (Dual Logging)
 handlers = [
-    logging.FileHandler(DEBUG_LOG),  # For the Web UI
-    logging.StreamHandler(sys.stderr),  # For Docker Logs
+    logging.FileHandler(DEBUG_LOG),
+    logging.StreamHandler(sys.stderr),
 ]
 
 logging.basicConfig(
@@ -79,7 +78,8 @@ def get_vpn_state():
         try:
             with open(LOG_FILE, "r", errors="replace") as f:
                 lines = f.readlines()
-                log_content = "".join(lines[-20:])  # Keep last 20 lines for UI
+                # --- FIX: Increase scan window to 300 lines to catch URL amidst verbosity ---
+                log_content = "".join(lines[-300:])
 
                 # Scan for success
                 for line in reversed(lines):
@@ -91,7 +91,10 @@ def get_vpn_state():
                             "log": "VPN Established Successfully!",
                         }
 
-                # Scan for Auth URL
+                # --- FIX: Context Aware Parsing ---
+                # Check if we are in the 'Manual Authentication' phase
+                is_manual_auth = "Manual Authentication Required" in log_content
+
                 url_pattern = re.compile(r'(https?://[^\s"<>]+)')
 
                 # Trace logging for parser logic (Only if LOG_LEVEL=TRACE)
@@ -106,10 +109,14 @@ def get_vpn_state():
                         found_url = match.group(1)
                         logger.trace(f"Line -{i}: Potential URL found: {found_url}")
 
+                        # --- FIX: Loose filter if manual auth is detected ---
+                        # The local callback URL usually looks like http://192.168.x.x:port/uuid
+                        # It does NOT contain 'saml' or 'sso'.
                         if (
                             "saml" in found_url.lower()
                             or "sso" in found_url.lower()
                             or "login" in found_url.lower()
+                            or (is_manual_auth and "http://" in found_url)
                         ):
                             sso_url = found_url
                             state = "auth"
@@ -135,7 +142,6 @@ def get_vpn_state():
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        # Serve Status API
         if self.path.startswith("/status.json"):
             self.send_response(200)
             self.send_header("Content-type", "application/json")
@@ -146,7 +152,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(data).encode("utf-8"))
             return
 
-        # Serve Static Files
         if self.path == "/":
             self.path = "/index.html"
         return http.server.SimpleHTTPRequestHandler.do_GET(self)

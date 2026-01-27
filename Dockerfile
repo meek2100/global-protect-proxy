@@ -14,8 +14,8 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /usr/src/app
 RUN git clone --branch v2.5.1 --recursive https://github.com/yuezk/GlobalProtect-openconnect.git .
 
-# --- PATCH: Disable Root Check ---
-# Even though we use gpuser, keeping this prevents panic if capabilities confuse the binary.
+# --- PATCH: Disable Root Check & Build with No GUI ---
+# Prevents the client from panicking if capabilities make it look like root.
 RUN grep -rl "cannot be run as root" . | xargs sed -i 's/if.*root.*/if false {/'
 # ---------------------------------
 
@@ -47,8 +47,9 @@ COPY --from=builder /usr/src/app/target/release/gpservice /usr/bin/
 COPY --from=builder /usr/src/app/target/release/gpauth /usr/bin/
 
 # --- PERMISSIONS: Allow gpservice to manage network as gpuser ---
-# This is critical. Without this, gpservice fails to create tun0.
-RUN setcap 'cap_net_admin+ep' /usr/bin/gpservice
+# We add cap_net_bind_service to allow binding to privileged/system ports if needed.
+# Without this, gpservice fails to create tun0.
+RUN setcap 'cap_net_admin,cap_net_bind_service+ep' /usr/bin/gpservice
 
 RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \
     chown -R gpuser:gpuser /var/www/html /tmp/gp-logs /run/dbus
