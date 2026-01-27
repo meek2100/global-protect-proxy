@@ -75,21 +75,18 @@ def get_vpn_state():
     log_content = ""
     sso_url = ""
     prompt_msg = ""
-    prompt_type = "text"  # text, password, select
+    prompt_type = "text"
     input_options = []
 
     if os.path.exists(LOG_FILE):
         try:
             with open(LOG_FILE, "r", errors="replace") as f:
                 lines = f.readlines()
-                # Keep last 300 lines for display
-                log_content = "".join(lines[-300:])
+                # Use a larger window to ensure state isn't lost during long auth flows
+                log_content = "".join(lines[-500:])
+                clean_lines = [strip_ansi(l) for l in lines[-100:]]
 
-                # Create clean lines for parsing (strip colors)
-                # We check the last 50 lines for active prompts
-                clean_lines = [strip_ansi(l) for l in lines[-50:]]
-
-                # 1. Check for Success
+                # 1. Check for Terminal Success
                 for line in reversed(clean_lines):
                     if "Connected" in line:
                         state = "connected"
@@ -99,17 +96,14 @@ def get_vpn_state():
                             "log": "VPN Established Successfully!",
                         }
 
-                # 2. Check for Interactive Prompts (PRIORITY OVER AUTH)
-                for i, line in enumerate(reversed(clean_lines)):
+                # 2. Check for Interactive Prompts (High Priority)
+                for line in reversed(clean_lines):
                     line_stripped = line.strip()
 
-                    # A. Gateway Selection (Dropdown)
                     if "Which gateway do you want to connect to" in line:
                         state = "input"
                         prompt_msg = "Select Gateway:"
                         prompt_type = "select"
-
-                        # Scrape options from the lines we just reversed
                         gateway_regex = re.compile(
                             r"(?:>)?\s+([a-zA-Z0-9-]+\s+\([a-zA-Z0-9.-]+\))"
                         )
@@ -123,59 +117,42 @@ def get_vpn_state():
                                     input_options.append(opt)
                         break
 
-                    # B. Specific Inputs (Masked)
                     if "password:" in line.lower():
                         state = "input"
-                        prompt_msg = line_stripped
+                        prompt_msg = "Enter Password:"
                         prompt_type = "password"
                         break
 
                     if "username:" in line.lower():
                         state = "input"
-                        prompt_msg = line_stripped
+                        prompt_msg = "Enter Username:"
                         prompt_type = "text"
                         break
 
-                    # C. Generic Catch-All (2FA, Challenges, etc.)
-                    # Logic: Line does NOT start with timestamp '[' AND ends with ':' or '?'
-                    # We also filter out "browser" instructions to avoid grabbing the Auth text.
                     if re.match(r"^[^\[].*[:?]\s*$", line_stripped):
-                        # Filter out common false positives
-                        if "browser" in line.lower() or "url" in line.lower():
+                        if any(x in line.lower() for x in ["browser", "url", "paste"]):
                             continue
-
                         state = "input"
                         prompt_msg = line_stripped
                         prompt_type = "text"
                         break
 
-                # 3. Check for Auth URL (Only if we aren't already prompting for input)
+                # 3. Check for Authentication Phase (Sticky State)
                 if state != "input":
                     is_manual_auth = "Manual Authentication Required" in log_content
-                    url_pattern = re.compile(r'(https?://[^\s"<>]+)')
+                    auth_active = "auth server started" in log_content
+                    # Persistence: Even if server stops, we stay in auth until connected
+                    if is_manual_auth or auth_active:
+                        state = "auth"
+                        url_pattern = re.compile(r'(https?://[^\s"<>]+)')
+                        found_urls = url_pattern.findall(log_content)
+                        if found_urls:
+                            # Prefer local callback URL if present
+                            local_urls = [
+                                u for u in found_urls if re.search(r":\d{4,5}/", u)
+                            ]
+                            sso_url = local_urls[-1] if local_urls else found_urls[-1]
 
-                    for line in reversed(lines[-300:]):
-                        if "prelogin.esp" in line:
-                            continue
-                        match = url_pattern.search(line)
-                        if match:
-                            found_url = match.group(1)
-                            if (
-                                "saml" in found_url.lower()
-                                or "sso" in found_url.lower()
-                                or "login" in found_url.lower()
-                                or (is_manual_auth and "http://" in found_url)
-                            ):
-                                sso_url = found_url
-                                state = "auth"
-                            logger.debug(
-                                f"State transition detected: AUTH | URL: {sso_url[:30]}..."
-                            )
-                            break
-                        else:
-                            logger.trace(
-                                f"URL rejected (no saml/sso keyword): {found_url}"
-                            )
         except Exception as e:
             logger.error(f"Error parsing vpn.log: {e}")
             log_content += f"\n[Error reading log: {e}]"
@@ -187,7 +164,7 @@ def get_vpn_state():
         "input_type": prompt_type,
         "options": input_options,
         "log": log_content,
-        "debug": f"State: {state} | Type: {prompt_type}",
+        "debug": f"State: {state} | Window: 500 lines",
     }
 
 

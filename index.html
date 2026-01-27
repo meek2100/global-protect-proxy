@@ -105,6 +105,17 @@
             background-color: #218838;
         }
 
+        .btn-outline {
+            background-color: transparent;
+            border: 2px solid #007bff;
+            color: #007bff;
+        }
+
+        .btn-outline:hover {
+            background-color: #007bff;
+            color: white;
+        }
+
         input[type="text"],
         input[type="password"],
         select {
@@ -189,16 +200,16 @@
             <h3>Authentication Required</h3>
             <div class="instruction-box">
                 <strong>Step 1:</strong> Click the button below to log in via SSO.<br>
-                <strong>Step 2:</strong> If your browser tries to launch "GlobalProtect", ignore or cancel it.<br>
-                <strong>Step 3:</strong> Copy the entire URL from the address bar (it may start with
-                <code>globalprotect://</code>) and paste it below.
+                <strong>Step 2:</strong> After login, copy the callback URL (starts with
+                <code>globalprotectcallback:</code>).<br>
+                <strong>Step 3:</strong> Paste it below.
             </div>
             <a id="sso-link" href="#" target="_blank" class="btn btn-success">Open Login Page</a>
             <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
-            <form action="/submit" method="POST">
-                <label for="cb_url" style="display:block; text-align:left; margin-bottom:5px; font-weight:bold;">Paste
-                    URL here:</label>
-                <input type="text" id="cb_url" name="callback_url" placeholder="globalprotect://..." required
+            <button type="button" onclick="pasteAndSubmit()" class="btn btn-outline" style="margin-bottom:15px;">📋
+                Paste & Submit from Clipboard</button>
+            <form action="/submit" method="POST" id="auth-form">
+                <input type="text" id="cb_url" name="callback_url" placeholder="Or paste manually here..." required
                     autocomplete="off">
                 <button type="submit" class="btn btn-primary">Submit Code</button>
             </form>
@@ -206,14 +217,11 @@
 
         <div id="view-input" class="hidden">
             <h3 id="input-title">Additional Input Required</h3>
-            <div class="instruction-box" id="input-prompt">
-                Please follow the instructions.
-            </div>
+            <div class="instruction-box" id="input-prompt">Please follow instructions.</div>
             <form action="/submit" method="POST">
                 <label for="user_input"
                     style="display:block; text-align:left; margin-bottom:5px; font-weight:bold;">Response:</label>
-                <div id="dynamic-input-container">
-                </div>
+                <div id="dynamic-input-container"></div>
                 <button type="submit" class="btn btn-primary">Send Response</button>
             </form>
         </div>
@@ -221,7 +229,7 @@
         <div id="view-connected" class="hidden">
             <div style="font-size: 50px; margin-bottom: 10px;">✅</div>
             <p><strong>Secure Connection Active</strong></p>
-            <p>SOCKS5 Proxy: <code>192.168.1.155:1080</code></p>
+            <p>SOCKS5 Proxy: <code>Port 1080</code></p>
         </div>
 
         <div style="margin-top:20px; display: flex; justify-content: space-between; align-items: center;">
@@ -233,37 +241,47 @@
     </div>
 
     <script>
+        window.currentVpnState = null;
+
         async function triggerConnect() {
             document.getElementById('status-badge').innerText = "STARTING...";
             await fetch('/connect', { method: 'POST' });
         }
+
+        async function pasteAndSubmit() {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (text) {
+                    document.getElementById('cb_url').value = text;
+                    document.getElementById('auth-form').submit();
+                }
+            } catch (err) { alert("Failed to read clipboard. Please paste manually."); }
+        }
+
         function toggleDebug() {
             const d = document.getElementById('debug-box');
             d.style.display = (d.style.display === 'none' || d.style.display === '') ? 'block' : 'none';
         }
 
         async function updateStatus() {
-            const debug = document.getElementById('debug-box');
             try {
                 const response = await fetch('/status.json?t=' + Date.now());
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
 
-                const badge = document.getElementById('status-badge');
-                badge.className = `status-badge status-${data.state}`;
-                badge.innerText = data.state.toUpperCase();
+                // Only switch views if the state has changed to preserve input focus
+                if (window.currentVpnState !== data.state) {
+                    ['idle', 'connecting', 'auth', 'input', 'connected'].forEach(id => {
+                        document.getElementById(`view-${id}`).classList.add('hidden');
+                    });
+                    const activeView = document.getElementById(`view-${data.state}`);
+                    if (activeView) activeView.classList.remove('hidden');
 
-                // Hide all views first
-                ['idle', 'connecting', 'auth', 'input', 'connected'].forEach(id => {
-                    const el = document.getElementById(`view-${id}`);
-                    if (el) el.classList.add('hidden');
-                });
+                    const badge = document.getElementById('status-badge');
+                    badge.className = `status-badge status-${data.state}`;
+                    badge.innerText = data.state.toUpperCase();
+                    window.currentVpnState = data.state;
+                }
 
-                // Show active view
-                const activeView = document.getElementById(`view-${data.state}`);
-                if (activeView) activeView.classList.remove('hidden');
-
-                // Update View Logic
                 if (data.state === 'auth' && data.url) {
                     const link = document.getElementById('sso-link');
                     if (link.getAttribute('href') !== data.url) link.href = data.url;
@@ -271,28 +289,19 @@
 
                 if (data.state === 'input') {
                     document.getElementById('input-prompt').innerText = data.prompt;
-
                     const container = document.getElementById('dynamic-input-container');
-                    // Only rebuild if the content type changed or options changed to avoid typing interference
-                    // For simplicity, we just rebuild if empty or if options changed significantly
-                    // Or simpler: Rebuild every time but restore focus?
-                    // Let's just assume simple poll.
 
-                    let html = '';
-                    if (data.input_type === 'select' && data.options && data.options.length > 0) {
-                        html = '<select name="user_input" id="user_input">';
-                        data.options.forEach(opt => {
-                            html += `<option value="${opt}">${opt}</option>`;
-                        });
-                        html += '</select>';
-                    } else if (data.input_type === 'password') {
-                        html = '<input type="password" name="user_input" id="user_input" placeholder="Enter Password..." required autocomplete="off">';
-                    } else {
-                        html = '<input type="text" name="user_input" id="user_input" placeholder="Type answer here..." required autocomplete="off">';
-                    }
-
-                    // Simple check to avoid overwriting user input while they type
-                    if (!container.innerHTML || (data.input_type === 'select' && !container.innerHTML.includes('select'))) {
+                    if (!container.innerHTML) {
+                        let html = '';
+                        if (data.input_type === 'select' && data.options && data.options.length > 0) {
+                            html = '<select name="user_input" id="user_input">';
+                            data.options.forEach(opt => { html += `<option value="${opt}">${opt}</option>`; });
+                            html += '</select>';
+                        } else if (data.input_type === 'password') {
+                            html = '<input type="password" name="user_input" id="user_input" placeholder="Enter Password..." required autocomplete="off">';
+                        } else {
+                            html = '<input type="text" name="user_input" id="user_input" placeholder="Type answer here..." required autocomplete="off">';
+                        }
                         container.innerHTML = html;
                     }
                 }
