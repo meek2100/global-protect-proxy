@@ -128,19 +128,22 @@ rm -f "$PIPE_STDIN" "$PIPE_CONTROL" "$MODE_FILE"
 mkfifo "$PIPE_STDIN" "$PIPE_CONTROL"
 mkdir -p /tmp/gp-logs
 touch "$LOG_FILE" "$DEBUG_LOG"
-chown -R gpuser:gpuser /tmp/gp-logs /var/www/html "$PIPE_STDIN" "$PIPE_CONTROL"
+
+# IMPORTANT: chmod 666 allows both root (VPN) and gpuser (Web) to read/write these files
+chmod 666 "$PIPE_STDIN" "$PIPE_CONTROL" "$LOG_FILE" "$DEBUG_LOG"
+chown -R gpuser:gpuser /tmp/gp-logs /var/www/html
 echo "idle" > "$MODE_FILE"
-chmod 644 "$MODE_FILE"
+chmod 666 "$MODE_FILE"
 
-# --- 6. START SERVICES (As gpuser) ---
-log "INFO" "Starting Services as gpuser..."
+# --- 6. START SERVICES ---
+log "INFO" "Starting Services..."
 
-# 1. Start gpservice (Critical dependency for gpclient)
+# 1. Start gpservice (Running as ROOT to avoid permission issues)
 # We append to DEBUG_LOG so if it crashes, we see why.
 log "INFO" "Starting GlobalProtect Service (gpservice)..."
-su - gpuser -c "/usr/bin/gpservice >> \"$DEBUG_LOG\" 2>&1 &"
+/usr/bin/gpservice >> "$DEBUG_LOG" 2>&1 &
 
-# 2. Start Microsocks
+# 2. Start Microsocks (Running as gpuser)
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
     log "INFO" "Starting Microsocks on port 1080..."
     su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
@@ -148,7 +151,7 @@ else
     log "INFO" "Microsocks disabled by mode '$VPN_MODE'."
 fi
 
-# 3. Start Python Server
+# 3. Start Python Server (Running as gpuser)
 log "INFO" "Starting Python Control Server..."
 su - gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
 
@@ -160,20 +163,22 @@ while true; do
     log "INFO" "Signal received. Starting gpclient..."
     echo "active" > "$MODE_FILE"
 
-    su - gpuser -c "
-        export VPN_PORTAL=\"$VPN_PORTAL\"
-        export GP_ARGS=\"$GP_ARGS\"
-        > \"$LOG_FILE\"
-        exec 3<> \"$PIPE_STDIN\"
+    # Running gpclient as ROOT to ensure it can modify tun0
 
-        # Launch gpclient with the PORTAL and the dynamic ARGS
-        CMD=\"stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
+    # Clear log for new run
+    > "$LOG_FILE"
 
-        # Log the command being run for debug purposes
-        echo \"[Entrypoint] Running: \$CMD\" >> \"$DEBUG_LOG\"
+    # Connect PIPE_STDIN to File Descriptor 3
+    exec 3<> "$PIPE_STDIN"
 
-        script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1
-    "
+    # Launch gpclient with the PORTAL and the dynamic ARGS
+    CMD="stdbuf -oL -eL gpclient --fix-openssl connect \"$VPN_PORTAL\" --browser remote $GP_ARGS"
+
+    # Log the command being run for debug purposes
+    echo "[Entrypoint] Running: $CMD" >> "$DEBUG_LOG"
+
+    # Run script using the pipe connected to FD 3
+    script -q -c "$CMD" /dev/null <&3 >> "$LOG_FILE" 2>&1
 
     log "WARN" "gpclient process exited."
     echo "idle" > "$MODE_FILE"
