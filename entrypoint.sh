@@ -167,9 +167,9 @@ while true; do
         exec 3<> \"$PIPE_STDIN\"
 
         # Launch gpclient with sudo to allow TUN/TAP device creation.
-        # Although we are running inside 'su - gpuser', sudo elevates gpclient back to root
-        # to satisfy kernel permissions (TUNSETIFF).
-        CMD=\"stdbuf -oL -eL sudo gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
+        # We invoke 'sudo stdbuf' so that stdbuf runs as root and can set LD_PRELOAD
+        # for gpclient. If we ran 'stdbuf sudo', sudo would strip the environment.
+        CMD=\"sudo stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
 
         # Log the command being run for debug purposes
         echo \"[Entrypoint] Running: \$CMD\" >> \"$DEBUG_LOG\"
