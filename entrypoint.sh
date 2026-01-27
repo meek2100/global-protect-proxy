@@ -42,8 +42,6 @@ log "INFO" "Entrypoint started. Level: $LOG_LEVEL, Mode: $VPN_MODE"
 
 # --- 1. NETWORK & MODE DETECTION ---
 log "INFO" "Inspecting network environment..."
-
-# Detect if eth0 is a macvlan interface
 IS_MACVLAN=false
 if ip -d link show eth0 | grep -q "macvlan"; then
     IS_MACVLAN=true
@@ -52,7 +50,7 @@ else
     log "DEBUG" "Network detection: Standard/Bridge interface detected."
 fi
 
-# --- AUTO-REVERT LOGIC ---
+# Auto-revert logic
 if [ "$VPN_MODE" == "gateway" ] || [ "$VPN_MODE" == "standard" ]; then
     if [ "$IS_MACVLAN" = false ]; then
         log "WARN" "Configuration Mismatch: '$VPN_MODE' mode requested but no Macvlan interface found."
@@ -66,7 +64,6 @@ log "INFO" "Final Operational Mode: $VPN_MODE"
 
 # --- 2. DNS CONFIGURATION ---
 DNS_TO_APPLY=""
-
 if [ -n "$DNS_SERVERS" ]; then
     log "INFO" "Custom DNS configuration found: $DNS_SERVERS"
     DNS_TO_APPLY=$(echo "$DNS_SERVERS" | tr ',' ' ')
@@ -88,6 +85,7 @@ fi
 # --- 3. NETWORK SETUP (Root) ---
 log "INFO" "Configuring Networking..."
 
+# Enable IP Forwarding
 if [ "$VPN_MODE" = "gateway" ] || [ "$VPN_MODE" = "standard" ]; then
     if [ "$(cat /proc/sys/net/ipv4/ip_forward)" = "1" ]; then
         log "DEBUG" "IP Forwarding is already enabled."
@@ -98,6 +96,7 @@ else
     log "DEBUG" "Skipping IP Forwarding (Not required for SOCKS)."
 fi
 
+# Firewall Rules
 iptables -F
 iptables -t nat -F
 iptables -A INPUT -p tcp --dport 8001 -j ACCEPT
@@ -123,18 +122,25 @@ log "INFO" "Initializing Environment..."
 
 rm -f "$PIPE_STDIN" "$PIPE_CONTROL" "$MODE_FILE"
 mkfifo "$PIPE_STDIN" "$PIPE_CONTROL"
-chmod 666 "$PIPE_STDIN" "$PIPE_CONTROL"
 
 mkdir -p /tmp/gp-logs
 touch "$LOG_FILE" "$DEBUG_LOG"
-chown -R gpuser:gpuser /tmp/gp-logs /var/www/html
+
+# IMPORTANT: Grant ownership to gpuser
+chown -R gpuser:gpuser /tmp/gp-logs /var/www/html "$PIPE_STDIN" "$PIPE_CONTROL"
 
 echo "idle" > "$MODE_FILE"
 chmod 644 "$MODE_FILE"
 
-# --- 5. START SERVICES ---
-log "INFO" "Starting Services..."
+# --- 5. START SERVICES (As gpuser) ---
+log "INFO" "Starting Services as gpuser..."
 
+# 1. Start gpservice (Critical dependency for gpclient)
+# We append to DEBUG_LOG so if it crashes, we see why.
+log "INFO" "Starting GlobalProtect Service (gpservice)..."
+su - gpuser -c "/usr/bin/gpservice >> \"$DEBUG_LOG\" 2>&1 &"
+
+# 2. Start Microsocks
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
     log "INFO" "Starting Microsocks on port 1080..."
     su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
@@ -142,31 +148,36 @@ else
     log "INFO" "Microsocks disabled by mode '$VPN_MODE'."
 fi
 
+# 3. Start Python Server
 log "INFO" "Starting Python Control Server..."
 su - gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
 
 # --- 6. MAIN CONTROL LOOP ---
 while true; do
     log "DEBUG" "Waiting for start signal..."
+
+    # Block until signal received
     read _ < "$PIPE_CONTROL"
 
     log "INFO" "Signal received. Starting gpclient..."
     echo "active" > "$MODE_FILE"
 
+    # Run gpclient as gpuser
     su - gpuser -c "
         export VPN_PORTAL=\"$VPN_PORTAL\"
         > \"$LOG_FILE\"
 
-        # Open pipe non-blocking
+        # Open pipe in Read+Write mode (FD 3) to prevent blocking
         exec 3<> \"$PIPE_STDIN\"
 
         echo \"[Entrypoint Subshell] Launching gpclient binary...\" >> \"$DEBUG_LOG\"
 
-        # Use <&3 to read from the open file descriptor
+        # Run gpclient using FD 3 as input
         stdbuf -oL -eL gpclient --fix-openssl connect \"\$VPN_PORTAL\" --browser remote <&3 >> \"$LOG_FILE\" 2>&1
     "
 
     log "WARN" "gpclient process exited."
     echo "idle" > "$MODE_FILE"
+
     sleep 2
 done
