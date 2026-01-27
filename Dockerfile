@@ -16,7 +16,7 @@ WORKDIR /usr/src/app
 # Clone source (v2.5.1)
 RUN git clone --branch v2.5.1 --recursive https://github.com/yuezk/GlobalProtect-openconnect.git .
 
-# PATCH: Force Headless Mode (Fixes "No such file" crash)
+# PATCH: Force Headless Mode
 RUN sed -i 's/let no_gui = false;/let no_gui = true;/' apps/gpservice/src/cli.rs
 
 # Build CLI only
@@ -29,13 +29,10 @@ FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 # 1. Install Runtime & Debug Dependencies
-#    - iproute2: Provides 'ip' command
-#    - net-tools: Provides 'ifconfig', 'netstat'
-#    - iputils-ping: Provides 'ping'
-#    - traceroute: Provides 'traceroute'
-#    - dnsutils: Provides 'nslookup'
-#    - curl: Connection testing
-#    - libgnutls30, liblz4-1: Required by gpclient
+#    - libpsl5: CRITICAL for cookie parsing (fixes "Failed to parse auth data")
+#    - libsecret-1-0: Required for credential storage calls
+#    - file: Required for MIME type detection
+#    - openssl: CLI tool sometimes used by scripts
 RUN apt-get update && apt-get install -y \
     microsocks \
     python3 \
@@ -53,6 +50,10 @@ RUN apt-get update && apt-get install -y \
     libxml2 \
     libgnutls30 \
     liblz4-1 \
+    libpsl5 \
+    libsecret-1-0 \
+    file \
+    openssl \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
