@@ -35,11 +35,17 @@ log_level = getattr(logging, env_level, logging.INFO)
 if env_level == "TRACE":
     log_level = TRACE_LEVEL_NUM
 
+# Configure Logging: File AND Console (Dual Logging)
+handlers = [
+    logging.FileHandler(DEBUG_LOG),  # For the Web UI
+    logging.StreamHandler(sys.stderr),  # For Docker Logs
+]
+
 logging.basicConfig(
-    filename=DEBUG_LOG,
     level=log_level,
     format="[%(asctime)s] [%(levelname)s] [server.py] %(message)s",
     datefmt="%Y-%m-%dT%H:%M:%SZ",
+    handlers=handlers,
 )
 
 logger = logging.getLogger()
@@ -200,5 +206,4 @@ if __name__ == "__main__":
 
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        # Redirect stderr to avoid cluttering docker logs unless error
         httpd.serve_forever()
