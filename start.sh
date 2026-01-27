@@ -5,7 +5,17 @@ set -e
 STATUS_FILE="/var/www/html/status.json"
 LOG_FILE="/tmp/gp-logs/vpn.log"
 
-# --- GATEWAY SETUP (Run as Root) ---
+# --- 1. DNS FIX FOR MACVLAN/PORTAINER ---
+# Since we cannot mount resolv.conf in Portainer easily, we overwrite it here.
+# This fixes the "Temporary failure in name resolution" error.
+echo "Force-updating /etc/resolv.conf..."
+cat > /etc/resolv.conf <<EOF
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+options ndots:0
+EOF
+
+# --- 2. NETWORK SETUP (Root) ---
 echo "=== Network Setup ==="
 
 # 1. Smart IP Forwarding Check
