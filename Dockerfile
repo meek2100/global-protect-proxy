@@ -1,7 +1,6 @@
 # --- Build Stage ---
 FROM rust:bookworm AS builder
 
-# Install build dependencies
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     build-essential cmake git \
@@ -18,25 +17,24 @@ WORKDIR /usr/src/app
 RUN git clone --branch v2.5.1 --recursive https://github.com/yuezk/GlobalProtect-openconnect.git .
 
 # --- PATCH: Force Headless Mode ---
-# The source code hardcodes 'no_gui = false' for release builds.
-# We use sed to flip this to 'true', preventing gpservice from ever trying to launch the GUI.
 RUN sed -i 's/let no_gui = false;/let no_gui = true;/' apps/gpservice/src/cli.rs
 
 # Build CLI only
-# We don't need gpgui-helper anymore because our patch ensures gpservice won't call it.
 RUN make build BUILD_GUI=0 BUILD_FE=0
 
 
-# --- Runtime Stage (Slim) ---
+# --- Runtime Stage ---
 FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 1. Install Runtime Dependencies
-#    - microsocks, python3: Proxy & Web Server
-#    - iptables, iproute2: Networking & NAT
-#    - vpnc-scripts: OpenConnect routing scripts
-#    - libgnutls30, liblz4-1: Required shared libraries for gpservice
+# 1. Install Runtime & Debug Dependencies
+#    - net-tools: ifconfig, netstat
+#    - iputils-ping: ping
+#    - traceroute: trace network path (ADDED)
+#    - procps: ps command
+#    - curl: connection testing
+#    - dnsutils: nslookup/dig
 RUN apt-get update && apt-get install -y \
     microsocks \
     python3 \
@@ -48,13 +46,19 @@ RUN apt-get update && apt-get install -y \
     libxml2 \
     libgnutls30 \
     liblz4-1 \
+    net-tools \
+    iputils-ping \
+    traceroute \
+    procps \
+    curl \
+    dnsutils \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
 # 2. Create User
 RUN useradd -m -s /bin/bash gpuser
 
-# 3. Copy Only Essential CLI Binaries
+# 3. Copy Binaries
 COPY --from=builder /usr/src/app/target/release/gpclient /usr/bin/
 COPY --from=builder /usr/src/app/target/release/gpservice /usr/bin/
 COPY --from=builder /usr/src/app/target/release/gpauth /usr/bin/

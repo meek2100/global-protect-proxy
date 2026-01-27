@@ -15,7 +15,7 @@ if [ "$(cat /proc/sys/net/ipv4/ip_forward)" = "1" ]; then
 else
     echo "Attempting to enable IP Forwarding..."
     # If not enabled, try to write. If read-only, print warning but don't crash.
-    echo 1 > /proc/sys/net/ipv4/ip_forward || echo "WARNING: Could not write to ip_forward. Ensure 'sysctls' is set in docker-compose."
+    echo 1 > /proc/sys/net/ipv4/ip_forward || echo "WARNING: Could not write to ip_forward. Ensure 'sysctls -net.ipv4.ip_forward=1' is set in docker-compose."
 fi
 
 # Configure NAT/Masquerade for Gateway Mode
