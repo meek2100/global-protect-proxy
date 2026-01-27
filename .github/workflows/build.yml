@@ -2,13 +2,17 @@ name: Build and Publish Docker Image
 
 on:
   push:
-    # Only build automatically on tags (Production Releases)
     tags: ["v*.*.*"]
-    # Do not build automatically on branch pushes
     branches-ignore: ["**"]
 
-  # Allow manual builds for any branch
+  # --- MODIFIED: Add Manual "No Cache" Checkbox ---
   workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: "Force a clean build (Ignore Cache)"
+        required: false
+        default: false
+        type: boolean
 
 env:
   REGISTRY: ghcr.io
@@ -41,11 +45,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            # Tag with branch name (e.g., dev, main) for manual runs
             type=ref,event=branch
-            # Tag with git tag (e.g., v1.0.0) for releases
             type=ref,event=tag
-            # 'latest' tag is ONLY applied when building from a git tag
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
       - name: Build and push Docker image
@@ -55,6 +56,13 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Enable caching for multi-stage builds
+
+          # --- KEY FEATURE: Dynamic Cache Disabling ---
+          # If the checkbox is checked, this becomes 'true', forcing a full rebuild.
+          # If unchecked (or running from a tag), it defaults to 'false'.
+          no-cache: ${{ inputs.force_rebuild || false }}
+
+          # We keep cache-from so normal runs are fast.
+          # 'no-cache: true' overrides this when selected.
           cache-from: type=gha
           cache-to: type=gha,mode=max
