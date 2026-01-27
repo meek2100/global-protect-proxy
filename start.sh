@@ -8,10 +8,15 @@ LOG_FILE="/tmp/gp-logs/vpn.log"
 # --- GATEWAY SETUP (Run as Root) ---
 echo "=== Network Setup ==="
 
-# Enable IP Forwarding
-# We use '|| true' so this doesn't crash the script if /proc is read-only.
-# (We rely on 'sysctls' in docker-compose.yml to set this for us).
-echo 1 > /proc/sys/net/ipv4/ip_forward || echo "WARNING: Could not write to ip_forward (likely read-only). Ensure 'sysctls' is set in docker-compose."
+# Smart IP Forwarding Check
+# If Docker has already set this (via sysctls), we skip writing to the read-only file.
+if [ "$(cat /proc/sys/net/ipv4/ip_forward)" = "1" ]; then
+    echo "IP Forwarding is already enabled (via docker-compose)."
+else
+    echo "Attempting to enable IP Forwarding..."
+    # If not enabled, try to write. If read-only, print warning but don't crash.
+    echo 1 > /proc/sys/net/ipv4/ip_forward || echo "WARNING: Could not write to ip_forward. Ensure 'sysctls' is set in docker-compose."
+fi
 
 # Configure NAT/Masquerade for Gateway Mode
 iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
@@ -75,6 +80,7 @@ else
 fi
 
 echo "Starting GlobalProtect Service (Headless)..."
+# Thanks to the patch, this will now run happily without needing the GUI helper
 su - gpuser -c "/usr/bin/gpservice &"
 sleep 1
 
