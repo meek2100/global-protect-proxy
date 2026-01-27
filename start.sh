@@ -21,7 +21,7 @@ if [ "$(cat /proc/sys/net/ipv4/ip_forward)" = "1" ]; then
     echo "IP Forwarding is already enabled (via docker-compose)."
 else
     echo "Attempting to enable IP Forwarding..."
-    echo 1 > /proc/sys/net/ipv4/ip_forward || echo "WARNING: Could not write to ip_forward. Ensure 'sysctls -net.ipv4.ip_forward=1' is set in docker-compose."
+    echo 1 > /proc/sys/net/ipv4/ip_forward || echo "WARNING: Could not write to ip_forward."
 fi
 
 iptables -F
@@ -88,8 +88,8 @@ while true; do
         while true; do
             echo \"DEBUG: Launching gpclient...\" >> \"$DEBUG_LOG\"
 
-            # Using stdbuf to ensure the log catches every line immediately
-            CMD=\"gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote\"
+            # CHANGED: Added 'stdbuf -oL -eL' to force line buffering so logs appear instantly
+            CMD=\"stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote\"
             script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1 &
             CLIENT_PID=\$!
 
@@ -100,7 +100,7 @@ while true; do
 
                 # 2. Advanced URL Detection logic
                 else
-                    # Scan for ANY http/https link that isn't prelogin
+                    # CHANGED: Added debug logging to see what regex finds
                     FOUND_URL=\$(grep -oE \"https?://[0-9a-zA-Z./:-]+\" \"$LOG_FILE\" | grep -v \"prelogin.esp\" | tail -1)
 
                     if [ -n \"\$FOUND_URL\" ]; then
@@ -109,10 +109,9 @@ while true; do
                         echo \"DEBUG: Found URL: \$CLEAN_URL\" >> \"$DEBUG_LOG\"
 
                         LINK_TEXT=\"Open Login Page (SSO)\"
-                        # Explicitly call the function to update JSON
                         write_state \"auth\" \"\$CLEAN_URL\" \"\$LINK_TEXT\" \"Captured URL from logs.\"
                     else
-                        # Just update the log content in the UI while waiting
+                        echo \"DEBUG: No URL found yet...\" >> \"$DEBUG_LOG\"
                         write_state \"connecting\" \"\" \"\" \"Scanning logs for SSO URL...\"
                     fi
                 fi
