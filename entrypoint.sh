@@ -40,7 +40,12 @@ log() {
 
 log "INFO" "Entrypoint started. Level: $LOG_LEVEL, Mode: $VPN_MODE"
 
-# --- 1. NETWORK & MODE DETECTION ---
+# --- 1. USER IDENTITY DETECTION ---
+if [ -n "$PUID" ]; then usermod -u "$PUID" gpuser; fi
+if [ -n "$PGID" ]; then groupmod -g "$PGID" gpuser; fi
+
+
+# --- 2. NETWORK & MODE DETECTION ---
 log "INFO" "Inspecting network environment..."
 IS_MACVLAN=false
 if ip -d link show eth0 | grep -q "macvlan"; then
@@ -62,7 +67,7 @@ fi
 
 log "INFO" "Final Operational Mode: $VPN_MODE"
 
-# --- 2. DNS CONFIGURATION ---
+# --- 3. DNS CONFIGURATION ---
 DNS_TO_APPLY=""
 if [ -n "$DNS_SERVERS" ]; then
     log "INFO" "Custom DNS configuration found: $DNS_SERVERS"
@@ -82,7 +87,7 @@ else
     log "INFO" "Using System/Docker DNS settings (No override)."
 fi
 
-# --- 3. NETWORK SETUP (Root) ---
+# --- 4. NETWORK SETUP (Root) ---
 log "INFO" "Configuring Networking..."
 
 # Enable IP Forwarding
@@ -117,7 +122,7 @@ fi
 
 log "INFO" "Network setup complete."
 
-# --- 4. INIT ENVIRONMENT ---
+# --- 5. INIT ENVIRONMENT ---
 log "INFO" "Initializing Environment..."
 
 rm -f "$PIPE_STDIN" "$PIPE_CONTROL" "$MODE_FILE"
@@ -132,7 +137,7 @@ chown -R gpuser:gpuser /tmp/gp-logs /var/www/html "$PIPE_STDIN" "$PIPE_CONTROL"
 echo "idle" > "$MODE_FILE"
 chmod 644 "$MODE_FILE"
 
-# --- 5. START SERVICES (As gpuser) ---
+# --- 6. START SERVICES (As gpuser) ---
 log "INFO" "Starting Services as gpuser..."
 
 # 1. Start gpservice (Critical dependency for gpclient)
@@ -152,7 +157,7 @@ fi
 log "INFO" "Starting Python Control Server..."
 su - gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
 
-# --- 6. MAIN CONTROL LOOP ---
+# --- 7. MAIN CONTROL LOOP ---
 while true; do
     log "DEBUG" "Waiting for start signal..."
 
