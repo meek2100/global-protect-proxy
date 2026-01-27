@@ -16,7 +16,7 @@ WORKDIR /usr/src/app
 # Clone source (v2.5.1)
 RUN git clone --branch v2.5.1 --recursive https://github.com/yuezk/GlobalProtect-openconnect.git .
 
-# --- PATCH: Force Headless Mode ---
+# PATCH: Force Headless Mode (Fixes "No such file" crash)
 RUN sed -i 's/let no_gui = false;/let no_gui = true;/' apps/gpservice/src/cli.rs
 
 # Build CLI only
@@ -24,34 +24,35 @@ RUN make build BUILD_GUI=0 BUILD_FE=0
 
 
 # --- Runtime Stage ---
-FROM debian:trixie-slim
+FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 # 1. Install Runtime & Debug Dependencies
-#    - net-tools: ifconfig, netstat
-#    - iputils-ping: ping
-#    - traceroute: trace network path (ADDED)
-#    - procps: ps command
-#    - curl: connection testing
-#    - dnsutils: nslookup/dig
+#    - iproute2: Provides 'ip' command
+#    - net-tools: Provides 'ifconfig', 'netstat'
+#    - iputils-ping: Provides 'ping'
+#    - traceroute: Provides 'traceroute'
+#    - dnsutils: Provides 'nslookup'
+#    - curl: Connection testing
+#    - libgnutls30, liblz4-1: Required by gpclient
 RUN apt-get update && apt-get install -y \
     microsocks \
     python3 \
     iptables \
     iproute2 \
+    net-tools \
+    iputils-ping \
+    traceroute \
+    dnsutils \
+    curl \
+    procps \
     libcap2-bin \
     vpnc-scripts \
     ca-certificates \
     libxml2 \
     libgnutls30 \
     liblz4-1 \
-    net-tools \
-    iputils-ping \
-    traceroute \
-    procps \
-    curl \
-    dnsutils \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
