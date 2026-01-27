@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /usr/src/app
 RUN git clone --branch v2.5.1 --recursive https://github.com/yuezk/GlobalProtect-openconnect.git .
+# Force no_gui mode in source to prevent accidental GUI dependency
 RUN sed -i 's/let no_gui = false;/let no_gui = true;/' apps/gpservice/src/cli.rs
 RUN make build BUILD_GUI=0 BUILD_FE=0
 
@@ -44,11 +45,11 @@ RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \
 
 COPY server.py /var/www/html/server.py
 COPY index.html /var/www/html/index.html
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Ensure the library path points to Trixie's architecture directories
 ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
 
 EXPOSE 1080 8001
-ENTRYPOINT ["/start.sh"]
+ENTRYPOINT ["/entrypoint.sh"]

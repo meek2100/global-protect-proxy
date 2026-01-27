@@ -18,7 +18,7 @@
         .card {
             background: white;
             width: 100%;
-            max-width: 500px;
+            max-width: 600px;
             padding: 30px;
             border-radius: 12px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -51,13 +51,19 @@
         }
 
         .status-auth {
-            background: #f8d7da;
-            color: #721c24;
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
         }
 
         .status-connected {
             background: #d4edda;
             color: #155724;
+        }
+
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
         }
 
         .btn {
@@ -103,6 +109,16 @@
             font-size: 14px;
         }
 
+        .instruction-box {
+            text-align: left;
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 15px 0;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
         #debug-box {
             margin-top: 20px;
             text-align: left;
@@ -114,11 +130,33 @@
             font-size: 12px;
             overflow-x: auto;
             white-space: pre-wrap;
+            max-height: 300px;
             display: none;
         }
 
         .hidden {
             display: none !important;
+        }
+
+        /* Spinner */
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px auto;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
         }
     </style>
 </head>
@@ -131,81 +169,111 @@
 
         <div id="view-idle" class="hidden">
             <p>VPN service is ready.</p>
-            <form action="/connect" method="POST">
-                <button type="submit" class="btn btn-primary">Connect to VPN</button>
-            </form>
+            <button onclick="triggerConnect()" class="btn btn-primary">Connect to VPN</button>
         </div>
 
         <div id="view-connecting" class="hidden">
             <div class="spinner"></div>
-            <p>Contacting server...</p>
+            <p>Initializing connection...</p>
+            <small>Scanning logs for authentication URL...</small>
         </div>
 
         <div id="view-auth" class="hidden">
-            <p><strong>Step 1:</strong> Log in via SSO</p>
+            <h3>Authentication Required</h3>
+
+            <div class="instruction-box">
+                <strong>Step 1:</strong> Click the button below to log in via SSO.<br>
+                <strong>Step 2:</strong> If your browser tries to launch "GlobalProtect", ignore or cancel it.<br>
+                <strong>Step 3:</strong> Copy the entire URL from the address bar (it may start with
+                <code>globalprotect://</code>) and paste it below.
+            </div>
+
             <a id="sso-link" href="#" target="_blank" class="btn btn-success">Open Login Page</a>
 
             <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
 
-            <p><strong>Step 2:</strong> Paste the callback URL here</p>
             <form action="/submit" method="POST">
-                <input type="text" name="callback_url" placeholder="Paste globalprotectcallback:..." required
+                <label for="cb_url" style="display:block; text-align:left; margin-bottom:5px; font-weight:bold;">Paste
+                    URL here:</label>
+                <input type="text" id="cb_url" name="callback_url" placeholder="globalprotect://..." required
                     autocomplete="off">
                 <button type="submit" class="btn btn-primary">Submit Code</button>
             </form>
         </div>
 
         <div id="view-connected" class="hidden">
-            <p>✅ <strong>Secure Connection Active</strong></p>
-            <p>SOCKS5 Proxy: <code>localhost:1080</code></p>
+            <div style="font-size: 50px; margin-bottom: 10px;">✅</div>
+            <p><strong>Secure Connection Active</strong></p>
+            <p>SOCKS5 Proxy: <code>192.168.1.155:1080</code></p>
         </div>
 
+        <div style="margin-top:20px;">
+            <a href="#" onclick="toggleDebug(); return false;" style="font-size:12px; color:#999;">Toggle Logs</a>
+        </div>
         <div id="debug-box"></div>
     </div>
 
     <script>
+        async function triggerConnect() {
+            document.getElementById('status-badge').innerText = "STARTING...";
+            await fetch('/connect', { method: 'POST' });
+            // UI will update on next poll
+        }
+
+        function toggleDebug() {
+            const d = document.getElementById('debug-box');
+            d.style.display = (d.style.display === 'none' || d.style.display === '') ? 'block' : 'none';
+        }
+
         async function updateStatus() {
+            const debug = document.getElementById('debug-box');
             try {
+                // Fetch JSON with cache busting
                 const response = await fetch('/status.json?t=' + Date.now());
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
                 const data = await response.json();
 
-                // updateBadge
+                // update Badge
                 const badge = document.getElementById('status-badge');
                 badge.className = `status-badge status-${data.state}`;
                 badge.innerText = data.state.toUpperCase();
 
                 // Hide all views
                 ['idle', 'connecting', 'auth', 'connected'].forEach(id => {
-                    document.getElementById(`view-${id}`).classList.add('hidden');
+                    const el = document.getElementById(`view-${id}`);
+                    if (el) el.classList.add('hidden');
                 });
 
                 // Show current view
                 const view = document.getElementById(`view-${data.state}`);
                 if (view) view.classList.remove('hidden');
 
-                // Specific logic
-                if (data.state === 'auth') {
+                // Update Auth Link if needed
+                if (data.state === 'auth' && data.url) {
                     const link = document.getElementById('sso-link');
-                    link.href = data.url;
-                    link.innerText = data.link_text || "Open Login Page";
+                    // Prevent refreshing the link if it hasn't changed (to avoid UI flicker)
+                    if (link.getAttribute('href') !== data.url) {
+                        link.href = data.url;
+                    }
                 }
 
-                // Debug Log
-                const debug = document.getElementById('debug-box');
+                // Update Log
                 if (data.log) {
-                    debug.style.display = 'block';
-                    debug.innerText = data.log;
-                } else {
-                    debug.style.display = 'none';
+                    debug.innerText = `--- SERVER DEBUG INFO ---\n${data.debug || ''}\n\n--- VPN LOGS ---\n${data.log}`;
                 }
 
             } catch (e) {
                 console.error("Poll failed", e);
+                // Don't overwrite the UI immediately on one failed poll,
+                // but log to debug box if visible
+                debug.innerText = `Connection Error: ${e.message}`;
             }
         }
 
-        // Poll every 1 second
-        setInterval(updateStatus, 1000);
+        // Poll every 1.5 seconds
+        setInterval(updateStatus, 1500);
         updateStatus();
     </script>
 
