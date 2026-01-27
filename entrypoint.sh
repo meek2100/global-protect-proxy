@@ -31,7 +31,7 @@ log() {
     esac
 
     if [ "$should_log" = true ]; then
-    local timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+        local timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
         local log_entry="[$timestamp] [$level] $msg"
         echo "$log_entry" >> "$DEBUG_LOG"
         echo "$log_entry" >&2
@@ -124,54 +124,21 @@ log "INFO" "Network setup complete."
 # --- 5. INIT ENVIRONMENT ---
 log "INFO" "Initializing Environment..."
 
-# --- 2. GLOBAL OPENSSL FIX (The "Sudo" equivalent) ---
-# Since 'setcap' strips environment variables (breaking --fix-openssl),
-# we must enable legacy renegotiation in the SYSTEM config.
-log "INFO" "Applying system-wide OpenSSL Legacy Renegotiation fix..."
-ssl_conf="/etc/ssl/openssl.cnf"
-
-# Ensure the config has the legacy option enabled in the default section
-if ! grep -q "UnsafeLegacyRenegotiation" "$ssl_conf"; then
-    # Append the option to the [system_default_sect] if it exists, or the end of file
-    if grep -q "\[system_default_sect\]" "$ssl_conf"; then
-        sed -i '/\[system_default_sect\]/a Options = UnsafeLegacyRenegotiation' "$ssl_conf"
-    else
-        # Fallback: simpler append if section missing (Debian specific)
-        echo -e "\n[system_default_sect]\nOptions = UnsafeLegacyRenegotiation" >> "$ssl_conf"
-    fi
-    log "INFO" "OpenSSL config patched."
-fi
-
-# --- 3. PERMISSIONS & CAPABILITIES (The "Anti-Root" Bypass) ---
-log "INFO" "Setting up permissions..."
-
-# A. Create Pipes & Logs
 rm -f "$PIPE_STDIN" "$PIPE_CONTROL" "$MODE_FILE"
 mkfifo "$PIPE_STDIN" "$PIPE_CONTROL"
 mkdir -p /tmp/gp-logs
 touch "$LOG_FILE" "$DEBUG_LOG"
-chmod 666 "$PIPE_STDIN" "$PIPE_CONTROL" "$LOG_FILE" "$DEBUG_LOG" "$MODE_FILE"
-chown -R gpuser:gpuser /tmp/gp-logs /var/www/html
+chown -R gpuser:gpuser /tmp/gp-logs /var/www/html "$PIPE_STDIN" "$PIPE_CONTROL"
+echo "idle" > "$MODE_FILE"
+chmod 644 "$MODE_FILE"
 
-# B. Fix VPNC Directory (Critical for 'mkdir permission denied' error)
-mkdir -p /var/run/vpnc
-chown -R gpuser:gpuser /var/run/vpnc
+# --- 6. START SERVICES (As gpuser) ---
+log "INFO" "Starting Services as gpuser..."
 
-# C. Apply Capabilities (Allows gpuser to modify network/tun0)
-# We apply to both /usr/bin and /usr/local/bin to be safe
-for bin in /usr/bin/gpclient /usr/local/bin/gpclient /usr/bin/gpservice /usr/local/bin/gpservice; do
-    if [ -f "$bin" ]; then
-        log "DEBUG" "Setting capabilities on $bin"
-        setcap 'cap_net_admin+ep' "$bin"
-    fi
-done
-
-# --- 4. START SERVICES ---
-log "INFO" "Starting Services..."
-
-# Start gpservice (Run as ROOT is safer for dbus, but setcap might allow user)
-# We run as root here to ensure the daemon is unhindered.
-/usr/bin/gpservice >> "$DEBUG_LOG" 2>&1 &
+# 1. Start gpservice (Critical dependency for gpclient)
+# We append to DEBUG_LOG so if it crashes, we see why.
+log "INFO" "Starting GlobalProtect Service (gpservice)..."
+su - gpuser -c "/usr/bin/gpservice >> \"$DEBUG_LOG\" 2>&1 &"
 
 # 2. Start Microsocks
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
@@ -185,30 +152,26 @@ fi
 log "INFO" "Starting Python Control Server..."
 su - gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
 
-# --- 5. MAIN LOOP ---
-echo "idle" > "$MODE_FILE"
+# --- 7. MAIN CONTROL LOOP ---
 while true; do
     log "DEBUG" "Waiting for start signal..."
     read _ < "$PIPE_CONTROL"
+
     log "INFO" "Signal received. Starting gpclient..."
     echo "active" > "$MODE_FILE"
-
-    # RUN AS GPUSER
-    # 1. We rely on 'setcap' to allow network changes (tun0).
-    # 2. We rely on the /etc/ssl/openssl.cnf patch for the SSL fix.
-
-    > "$LOG_FILE"
-    chown gpuser:gpuser "$LOG_FILE"
 
     su - gpuser -c "
         export VPN_PORTAL=\"$VPN_PORTAL\"
         export GP_ARGS=\"$GP_ARGS\"
+        > \"$LOG_FILE\"
         exec 3<> \"$PIPE_STDIN\"
 
-        # Note: We do NOT need --fix-openssl anymore as we patched the system config
-        CMD=\"stdbuf -oL -eL gpclient connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
+        # Launch gpclient with the PORTAL and the dynamic ARGS
+        CMD=\"stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
 
-        echo \"[Entrypoint Subshell] Launching: \$CMD\" >> \"$DEBUG_LOG\"
+        # Log the command being run for debug purposes
+        echo \"[Entrypoint] Running: \$CMD\" >> \"$DEBUG_LOG\"
+
         script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1
     "
 
