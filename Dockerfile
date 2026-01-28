@@ -4,8 +4,9 @@ FROM rust:trixie AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
 # 1. Install Build Dependencies
+# Added 'binutils' to ensure 'strip' command is available
 RUN apt-get update && apt-get install -y \
-    build-essential cmake git \
+    build-essential cmake git binutils \
     libssl-dev libxml2-dev \
     libopenconnect-dev \
     libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
@@ -23,8 +24,9 @@ RUN grep -rl "cannot be run as root" . | xargs sed -i 's/if.*root.*/if false {/'
 RUN sed -i 's/let no_gui = false;/let no_gui = true;/' apps/gpservice/src/cli.rs
 
 # --- COMPILATION (Optimized) ---
-# Enable Link Time Optimization (LTO) for smaller binaries
-ENV CARGO_PROFILE_RELEASE_LTO=true \
+# FIX: Use 'thin' LTO instead of 'true'.
+# 'true' (Fat LTO) causes OOM crashes on standard GitHub Runners (7GB RAM).
+ENV CARGO_PROFILE_RELEASE_LTO=thin \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
     CARGO_PROFILE_RELEASE_PANIC=abort
 
@@ -37,7 +39,7 @@ RUN cargo build --release --bin gpservice
 # 3. Build gpauth (Headless)
 RUN cargo build --release --bin gpauth --no-default-features
 
-# OPTIMIZATION: Strip debug symbols (This is the huge size saver)
+# OPTIMIZATION: Strip debug symbols (Reduces size by ~30-40%)
 RUN strip target/release/gpclient target/release/gpservice target/release/gpauth
 
 # --- Runtime Stage ---
