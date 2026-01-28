@@ -16,8 +16,6 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /usr/src/app
 
 # --- FIX: Use GitHub Mirror for libxml2 ---
-# The upstream server (gitlab.gnome.org) is returning 502 errors.
-# We clone the main repo, then manually point libxml2 to the GitHub mirror before updating submodules.
 RUN git clone --branch v2.5.1 https://github.com/yuezk/GlobalProtect-openconnect.git . && \
     git submodule init && \
     git config submodule.crates/openconnect/deps/libxml2.url https://github.com/GNOME/libxml2.git && \
@@ -30,7 +28,6 @@ RUN grep -rl "cannot be run as root" . | xargs sed -i 's/if.*root.*/if false {/'
 RUN sed -i 's/let no_gui = false;/let no_gui = true;/' apps/gpservice/src/cli.rs
 
 # --- COMPILATION (Optimized) ---
-# Use 'thin' LTO to avoid OOM crashes on GitHub Runners
 ENV CARGO_PROFILE_RELEASE_LTO=thin \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
     CARGO_PROFILE_RELEASE_PANIC=abort
@@ -44,7 +41,7 @@ RUN cargo build --release --bin gpservice
 # 3. Build gpauth (Headless)
 RUN cargo build --release --bin gpauth --no-default-features
 
-# OPTIMIZATION: Strip debug symbols (Reduces size by ~30-40%)
+# OPTIMIZATION: Strip debug symbols
 RUN strip target/release/gpclient target/release/gpservice target/release/gpauth
 
 # --- Runtime Stage ---
@@ -53,8 +50,9 @@ FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 # MINIMAL RUNTIME DEPENDENCIES
+# Added 'procps' to provide 'pkill' command (Critical for disconnect/reset)
 RUN apt-get update && apt-get install -y \
-    microsocks python3 iptables iproute2 util-linux \
+    microsocks python3 iptables iproute2 util-linux procps \
     vpnc-scripts ca-certificates \
     libxml2 libgnutls30t64 liblz4-1 libpsl5 libsecret-1-0 openssl \
     sudo \
@@ -89,7 +87,7 @@ RUN chmod +x /entrypoint.sh
 
 ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
 
-# Add Healthcheck to ensure container is responsive
+# Add Healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8001/status.json').getcode())" || exit 1
 
