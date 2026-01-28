@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# --- FIX: Ensure administrative commands (ip, iptables) are in PATH ---
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+
 # --- CONFIGURATION ---
 LOG_FILE="/tmp/gp-logs/vpn.log"
 DEBUG_LOG="/tmp/gp-logs/debug_parser.log"
@@ -39,14 +42,12 @@ log() {
 
 log "INFO" "Entrypoint started. Level: $LOG_LEVEL, Mode: $VPN_MODE"
 
-# --- DNS WATCHDOG (OPTIMIZED) ---
+# --- DNS WATCHDOG ---
 dns_watchdog() {
     local last_dns=""
     log "INFO" "Starting DNS Watchdog..."
     while true; do
         local current_dns=""
-
-        # Pure Bash file parsing to avoid spawning grep/awk processes
         if [ -f /etc/resolv.conf ]; then
             while read -r line; do
                 if [[ "$line" =~ ^nameserver\ +([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) ]]; then
@@ -62,15 +63,12 @@ dns_watchdog() {
         if [ -n "$current_dns" ] && [ "$current_dns" != "$last_dns" ]; then
             if [[ "$current_dns" != "8.8.8.8" && "$current_dns" != "1.1.1.1" ]]; then
                 log "INFO" "VPN DNS Detected: $current_dns. Enabling Transparent Forwarding..."
-
                 if [ -n "$last_dns" ]; then
                     iptables -t nat -D PREROUTING -i eth0 -p udp --dport 53 -j DNAT --to-destination "$last_dns" 2>/dev/null || true
                     iptables -t nat -D PREROUTING -i eth0 -p tcp --dport 53 -j DNAT --to-destination "$last_dns" 2>/dev/null || true
                 fi
-
                 iptables -t nat -A PREROUTING -i eth0 -p udp --dport 53 -j DNAT --to-destination "$current_dns"
                 iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 53 -j DNAT --to-destination "$current_dns"
-
                 last_dns="$current_dns"
                 log "INFO" "DNS Forwarding Active."
             fi
@@ -86,6 +84,7 @@ if [ -n "$PGID" ]; then groupmod -g "$PGID" gpuser; fi
 # --- 2. NETWORK & MODE DETECTION ---
 log "INFO" "Inspecting network environment..."
 IS_MACVLAN=false
+# Using full path to ip just in case, but PATH export handles it
 if ip -d link show eth0 | grep -q "macvlan"; then
     IS_MACVLAN=true
     log "DEBUG" "Network detection: MACVLAN interface detected."
