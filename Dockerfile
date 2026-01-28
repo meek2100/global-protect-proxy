@@ -15,7 +15,14 @@ RUN apt-get update && apt-get install -y \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
-RUN git clone --branch v2.5.1 --recursive https://github.com/yuezk/GlobalProtect-openconnect.git .
+
+# --- FIX: Use GitHub Mirror for libxml2 ---
+# The upstream server (gitlab.gnome.org) is returning 502 errors.
+# We clone the main repo, then manually point libxml2 to the GitHub mirror before updating submodules.
+RUN git clone --branch v2.5.1 https://github.com/yuezk/GlobalProtect-openconnect.git . && \
+    git submodule init && \
+    git config submodule.crates/openconnect/deps/libxml2.url https://github.com/GNOME/libxml2.git && \
+    git submodule update --recursive
 
 # PATCH: Disable Root Check
 RUN grep -rl "cannot be run as root" . | xargs sed -i 's/if.*root.*/if false {/'
@@ -24,8 +31,7 @@ RUN grep -rl "cannot be run as root" . | xargs sed -i 's/if.*root.*/if false {/'
 RUN sed -i 's/let no_gui = false;/let no_gui = true;/' apps/gpservice/src/cli.rs
 
 # --- COMPILATION (Optimized) ---
-# FIX: Use 'thin' LTO instead of 'true'.
-# 'true' (Fat LTO) causes OOM crashes on standard GitHub Runners (7GB RAM).
+# FIX: Use 'thin' LTO to avoid OOM crashes on GitHub Runners
 ENV CARGO_PROFILE_RELEASE_LTO=thin \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
     CARGO_PROFILE_RELEASE_PANIC=abort
