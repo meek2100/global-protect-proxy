@@ -1,0 +1,40 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+.env
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Rust (if building locally) ---
+target/
+**/*.rs.bk
+Cargo.lock
+
+# --- Docker ---
+# If you have local docker build contexts or logs
+docker-context/
+
+# --- IDE & OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# --- Project Specific ---
+# Ignore logs and temporary pipes if generated in root during dev
+*.log
+gp-client.log
+gp-service.log
+gp-stdin
+gp-control
