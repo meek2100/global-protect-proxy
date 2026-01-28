@@ -1,4 +1,6 @@
 # File: .pre-commit-config.yaml
+exclude: ^(.*\.min\.(css|js))
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -10,7 +12,19 @@ repos:
       - id: check-added-large-files
         args: ["--maxkb=500"]
 
-  # Python Formatting and Linting
+  - repo: https://github.com/rbubley/mirrors-prettier
+    rev: "v3.4.2"
+    hooks:
+      - id: prettier
+        types_or: [css, javascript, html, json, yaml]
+        args: ["--config", ".prettierrc.yaml"]
+
+  - repo: https://github.com/meek2100/pre-commit-context-header
+    rev: v0.1.0
+    hooks:
+      - id: context-headers
+        args: ["--fix"]
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.11
     hooks:
@@ -18,16 +32,26 @@ repos:
       - id: ruff-check
         args: ["--fix"]
 
-  # Shell Script Linting (Crucial for entrypoint.sh)
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
     hooks:
       - id: shellcheck
         args: ["--format=gcc"]
 
-  # Dockerfile Linting
   - repo: https://github.com/AleksaC/hadolint-py
     rev: v2.14.0
     hooks:
       - id: hadolint
-        args: ["--ignore", "DL3008"] # Ignore pin-versions-in-apt-get for trixie/rolling
+        args: ["--ignore", "DL3008"]
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: ["--config-file", ".yamllint.yaml"]
+
+  - repo: https://github.com/IamTheFij/docker-pre-commit
+    rev: v3.0.1
+    hooks:
+      - id: docker-compose-check
+        files: ^docker-compose\.yml$

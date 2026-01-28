@@ -4,12 +4,12 @@ name: Dependabot Pre-Commit Sync
 on:
   pull_request:
     types: [opened, synchronize]
-    branches:
-      - "dependabot/**"
-    # Triggered when Docker or Action dependencies are updated
+    branches: ["dependabot/**"]
     paths:
       - "Dockerfile"
-      - ".github/workflows/**"
+      - "entrypoint.sh"
+      - "server.py"
+      - ".pre-commit-config.yaml"
 
 permissions:
   contents: write
@@ -26,13 +26,17 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.14" # Updated to match your latest baseline
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20 # Required for Prettier initialization
 
       - name: Install pre-commit
         run: pip install pre-commit
 
       - name: Run pre-commit autoupdate
-        # Updates 'rev' tags for hooks like ShellCheck, Hadolint, and Ruff
         run: pre-commit autoupdate
 
       - name: Commit and Push changes
