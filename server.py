@@ -16,9 +16,9 @@ from collections import deque
 PORT = 8001
 FIFO_STDIN = "/tmp/gp-stdin"
 FIFO_CONTROL = "/tmp/gp-control"
-LOG_FILE = "/tmp/gp-logs/vpn.log"
+CLIENT_LOG = "/tmp/gp-logs/gp-client.log"
 MODE_FILE = "/tmp/gp-mode"
-DEBUG_LOG = "/tmp/gp-logs/debug_parser.log"
+SERVICE_LOG = "/tmp/gp-logs/gp-service.log"
 
 # --- Logging Setup ---
 # Unified Logging Format: Matches Rust and Entrypoint (ISO 8601 + Z)
@@ -27,7 +27,7 @@ logging.basicConfig(
     format="[%(asctime)s] [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%dT%H:%M:%SZ",
     handlers=[
-        logging.FileHandler(DEBUG_LOG),
+        logging.FileHandler(SERVICE_LOG),
         logging.StreamHandler(sys.stderr),
     ],
 )
@@ -81,9 +81,9 @@ def get_vpn_state():
     error_msg = ""
 
     # 2. Parse Logs
-    if os.path.exists(LOG_FILE):
+    if os.path.exists(CLIENT_LOG):
         try:
-            with open(LOG_FILE, "r", errors="replace") as f:
+            with open(CLIENT_LOG, "r", errors="replace") as f:
                 lines = list(deque(f, maxlen=300))
                 log_content = "".join(lines)
                 # FIX: Renamed 'l' to 'line' to satisfy Ruff E741
@@ -202,14 +202,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 )
                 self.end_headers()
 
-                self.wfile.write(b"=== SYSTEM DEBUG LOG ===\n\n")
-                if os.path.exists(DEBUG_LOG):
-                    with open(DEBUG_LOG, "rb") as f:
+                self.wfile.write(b"=== SERVICE LOG (Wrapper/UI) ===\n\n")
+                if os.path.exists(SERVICE_LOG):
+                    with open(SERVICE_LOG, "rb") as f:
                         shutil.copyfileobj(f, self.wfile)
 
-                self.wfile.write(b"\n\n=== VPN CLIENT LOG ===\n\n")
-                if os.path.exists(LOG_FILE):
-                    with open(LOG_FILE, "rb") as f:
+                self.wfile.write(b"\n\n=== CLIENT LOG (GlobalProtect) ===\n\n")
+                if os.path.exists(CLIENT_LOG):
+                    with open(CLIENT_LOG, "rb") as f:
                         shutil.copyfileobj(f, self.wfile)
             except Exception:
                 pass

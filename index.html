@@ -112,18 +112,23 @@
                 }
             }
 
-            /* Header Controls (Restored) */
+            /* --- HEADER LAYOUT (IMPROVED) --- */
             .card-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
                 margin-bottom: 32px;
-                position: relative;
+                text-align: left;
+            }
+
+            .header-text {
+                margin-right: 16px;
             }
 
             .control-group {
-                position: absolute;
-                top: 0;
-                right: 0;
                 display: flex;
                 gap: 8px;
+                flex-shrink: 0;
             }
 
             .icon-btn {
@@ -152,7 +157,7 @@
             h1 {
                 font-size: 1.5rem;
                 font-weight: 700;
-                margin: 0 0 8px 0;
+                margin: 0 0 4px 0;
             }
 
             .subtitle {
@@ -370,6 +375,10 @@
         <div class="app-container">
             <div class="card">
                 <div class="card-header">
+                    <div class="header-text">
+                        <h1>GlobalProtect</h1>
+                        <p class="subtitle">Secure Proxy Gateway</p>
+                    </div>
                     <div class="control-group">
                         <button class="icon-btn" id="theme-toggle" title="Toggle Theme" onclick="toggleTheme()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -403,8 +412,6 @@
                             </svg>
                         </button>
                     </div>
-                    <h1>GlobalProtect</h1>
-                    <p class="subtitle">Secure Proxy Gateway</p>
                 </div>
 
                 <div id="status-badge" class="badge idle">

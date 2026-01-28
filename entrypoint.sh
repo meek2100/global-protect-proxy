@@ -6,8 +6,8 @@ set -e
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 # --- CONFIGURATION ---
-LOG_FILE="/tmp/gp-logs/vpn.log"
-DEBUG_LOG="/tmp/gp-logs/debug_parser.log"
+CLIENT_LOG="/tmp/gp-logs/gp-client.log"
+SERVICE_LOG="/tmp/gp-logs/gp-service.log"
 MODE_FILE="/tmp/gp-mode"
 PIPE_STDIN="/tmp/gp-stdin"
 PIPE_CONTROL="/tmp/gp-control"
@@ -40,7 +40,7 @@ log() {
     if [ "$should_log" = true ]; then
         local timestamp
         timestamp=$(date +'%Y-%m-%dT%H:%M:%SZ')
-        echo "[$timestamp] [$level] $msg" >>"$DEBUG_LOG"
+        echo "[$timestamp] [$level] $msg" >>"$SERVICE_LOG"
         echo "[$timestamp] [$level] $msg" >&2
     fi
 }
@@ -73,7 +73,7 @@ check_services() {
 
         log "ERROR" "--- DUMPING LOGS (Last 50 lines) ---"
         # FIX: Write to stderr (>&2) instead of appending to the file we are reading (SC2094)
-        tail -n 50 "$DEBUG_LOG" >&2
+        tail -n 50 "$SERVICE_LOG" >&2
 
         # exit 1  <-- DISABLED FOR DEBUGGING as requested
     fi
@@ -176,7 +176,7 @@ fi
 rm -f "$PIPE_STDIN" "$PIPE_CONTROL" "$MODE_FILE"
 mkfifo "$PIPE_STDIN" "$PIPE_CONTROL"
 mkdir -p /tmp/gp-logs
-touch "$LOG_FILE" "$DEBUG_LOG"
+touch "$CLIENT_LOG" "$SERVICE_LOG"
 chown -R gpuser:gpuser /tmp/gp-logs /var/www/html "$PIPE_STDIN" "$PIPE_CONTROL"
 echo "idle" >"$MODE_FILE"
 chmod 644 "$MODE_FILE"
@@ -193,7 +193,7 @@ dns_watchdog &
 runuser -u gpuser -- bash -c "
     /usr/bin/gpservice 2>&1 | \
     grep --line-buffered -v -E 'Failed to start WS server|Error: No such file or directory \(os error 2\)' \
-    >> \"$DEBUG_LOG\"
+    >> \"$SERVICE_LOG\"
 " &
 
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
@@ -202,11 +202,11 @@ fi
 
 # Pass configuration to Server
 runuser -u gpuser -- env VPN_MODE="$VPN_MODE" LOG_LEVEL="$LOG_LEVEL" \
-    python3 -u /var/www/html/server.py >>"$DEBUG_LOG" 2>&1 &
+    python3 -u /var/www/html/server.py >>"$SERVICE_LOG" 2>&1 &
 
 # FIX: Stream logs to Docker stdout in background
 # 'tail -F' follows retries if file is recreated
-tail -F "$DEBUG_LOG" "$LOG_FILE" &
+tail -F "$SERVICE_LOG" "$CLIENT_LOG" &
 
 # Grace period for services to settle before we start checking them
 sleep 3
@@ -222,14 +222,14 @@ while true; do
         runuser -u gpuser -- bash -c "
             export VPN_PORTAL=\"$VPN_PORTAL\"
             export GP_ARGS=\"$GP_ARGS\"
-            > \"$LOG_FILE\"
+            > \"$CLIENT_LOG\"
             exec 3<> \"$PIPE_STDIN\"
 
             # Using sudo for gpclient to allow full network access
             CMD=\"sudo gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
 
-            echo \"[Entrypoint] Executing: \$CMD\" >> \"$DEBUG_LOG\"
-            script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1
+            echo \"[Entrypoint] Executing: \$CMD\" >> \"$SERVICE_LOG\"
+            script -q -c \"\$CMD\" /dev/null <&3 >> \"$CLIENT_LOG\" 2>&1
         "
 
         log "WARN" "gpclient exited."
