@@ -1,0 +1,44 @@
+# File: .github/workflows/pre-commit-sync.yaml
+name: Dependabot Pre-Commit Sync
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - "dependabot/**"
+    # Triggered when Docker or Action dependencies are updated
+    paths:
+      - "Dockerfile"
+      - ".github/workflows/**"
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Dependabot's Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      - name: Run pre-commit autoupdate
+        # Updates 'rev' tags for hooks like ShellCheck, Hadolint, and Ruff
+        run: pre-commit autoupdate
+
+      - name: Commit and Push changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(deps): Synchronize pre-commit hooks"
+          files: ".pre-commit-config.yaml"
+          branch: ${{ github.event.pull_request.head.ref }}
+          commit_author: Dependabot <dependabot@users.noreply.github.com>

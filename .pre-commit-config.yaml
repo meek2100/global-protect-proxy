@@ -1,0 +1,33 @@
+# File: .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+
+  # Python Formatting and Linting
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.11
+    hooks:
+      - id: ruff-format
+      - id: ruff-check
+        args: ["--fix"]
+
+  # Shell Script Linting (Crucial for entrypoint.sh)
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        args: ["--format=gcc"]
+
+  # Dockerfile Linting
+  - repo: https://github.com/AleksaC/hadolint-py
+    rev: v2.14.0
+    hooks:
+      - id: hadolint
+        args: ["--ignore", "DL3008"] # Ignore pin-versions-in-apt-get for trixie/rolling

@@ -4,8 +4,6 @@ on:
   push:
     tags: ["v*.*.*"]
     branches-ignore: ["**"]
-
-  # --- MODIFIED: Add Manual "No Cache" Checkbox ---
   workflow_dispatch:
     inputs:
       force_rebuild:
@@ -19,7 +17,24 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # --- NEW: Pre-commit Linting Job ---
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run Pre-commit Hooks
+        uses: pre-commit/action@v3.0.1
+
+  # --- Modified: Build Job depends on Lint ---
   build-and-push:
+    needs: lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -56,13 +71,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-
-          # --- KEY FEATURE: Dynamic Cache Disabling ---
-          # If the checkbox is checked, this becomes 'true', forcing a full rebuild.
-          # If unchecked (or running from a tag), it defaults to 'false'.
           no-cache: ${{ inputs.force_rebuild || false }}
-
-          # We keep cache-from so normal runs are fast.
-          # 'no-cache: true' overrides this when selected.
           cache-from: type=gha
           cache-to: type=gha,mode=max
