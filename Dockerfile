@@ -53,7 +53,6 @@ FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 # MINIMAL RUNTIME DEPENDENCIES
-# Explicitly install iproute2 and ensure it stays.
 RUN apt-get update && apt-get install -y \
     microsocks python3 iptables iproute2 util-linux \
     vpnc-scripts ca-certificates \
@@ -76,8 +75,6 @@ COPY --from=builder \
     /usr/bin/
 
 # Set capabilities for gpservice
-# FIX: Do NOT run 'autoremove' here. It deletes iproute2.
-# We simply install setcap, use it, and leave it (it's tiny).
 RUN apt-get update && apt-get install -y libcap2-bin && \
     setcap 'cap_net_admin,cap_net_bind_service+ep' /usr/bin/gpservice && \
     rm -rf /var/lib/apt/lists/*
@@ -91,6 +88,10 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
+
+# Add Healthcheck to ensure container is responsive
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8001/status.json').getcode())" || exit 1
 
 EXPOSE 1080 8001
 ENTRYPOINT ["/entrypoint.sh"]

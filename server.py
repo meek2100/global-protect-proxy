@@ -9,6 +9,7 @@ import logging
 import shutil
 import subprocess
 import time
+from collections import deque
 
 # --- Configuration ---
 PORT = 8001
@@ -64,8 +65,6 @@ def get_vpn_state():
     current_state = "idle"
 
     # 1. Check Mode File
-    # If entrypoint.sh says "active", we are at least connecting.
-    # If entrypoint.sh writes "idle", we trust that immediately.
     if os.path.exists(MODE_FILE):
         try:
             with open(MODE_FILE, "r") as f:
@@ -88,8 +87,9 @@ def get_vpn_state():
     if os.path.exists(LOG_FILE):
         try:
             with open(LOG_FILE, "r", errors="replace") as f:
-                lines = f.readlines()
-                log_content = "".join(lines[-300:])
+                # Use deque to read only the last 300 lines to prevent memory issues
+                lines = list(deque(f, maxlen=300))
+                log_content = "".join(lines)
                 clean_lines = [strip_ansi(l).strip() for l in lines[-100:]]
 
                 # A. Success Check
@@ -216,18 +216,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return http.server.SimpleHTTPRequestHandler.do_GET(self)
 
     def do_POST(self):
-        # --- CONNECT HANDLER ---
         if self.path == "/connect":
             logger.info("User requested Connection (POST /connect)")
             try:
                 logger.info("Ensuring previous gpclient processes are terminated...")
-                # Use sudo because gpclient runs as root
                 subprocess.run(["sudo", "pkill", "gpclient"], stderr=subprocess.DEVNULL)
-                time.sleep(0.5)  # Allow entrypoint loop to reset
+                time.sleep(0.5)
             except Exception as e:
                 logger.error(f"Failed to kill gpclient: {e}")
 
             try:
+                # Open pipe for writing. This will block until entrypoint.sh reads.
+                # Because we are now multi-threaded, this block won't freeze the UI status polling.
                 with open(FIFO_CONTROL, "w") as f:
                     f.write("START\n")
                 self.send_response(200)
@@ -238,12 +238,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_error(500, "Failed to start VPN process")
             return
 
-        # --- DISCONNECT HANDLER (NEW) ---
         if self.path == "/disconnect":
             logger.info("User requested Disconnect (POST /disconnect)")
             try:
-                # Use sudo to kill the root process.
-                # entrypoint.sh will detect the exit and set state to 'idle'.
                 subprocess.run(["sudo", "pkill", "gpclient"], stderr=subprocess.DEVNULL)
                 self.send_response(200)
                 self.end_headers()
@@ -253,7 +250,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_error(500, "Failed to stop VPN process")
             return
 
-        # --- SUBMIT HANDLER ---
         if self.path == "/submit":
             try:
                 length = int(self.headers.get("Content-Length", 0))
@@ -295,8 +291,10 @@ if __name__ == "__main__":
         os.mkfifo(FIFO_CONTROL)
         os.chmod(FIFO_CONTROL, 0o666)
 
+    # FIX: Use ThreadingTCPServer so that blocking operations (like writing to a pipe)
+    # do not freeze other requests (like /status.json polling).
     socketserver.TCPServer.allow_reuse_address = True
 
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        logger.info("Server Ready. Waiting for interactions.")
+    with socketserver.ThreadingTCPServer(("", PORT), Handler) as httpd:
+        logger.info("Server Ready (Multi-threaded). Waiting for interactions.")
         httpd.serve_forever()

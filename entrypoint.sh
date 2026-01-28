@@ -40,6 +40,18 @@ log() {
     fi
 }
 
+# --- GRACEFUL SHUTDOWN TRAP ---
+cleanup() {
+    log "WARN" "Received Shutdown Signal (SIGTERM/SIGINT)"
+    log "INFO" "Killing gpclient..."
+    sudo pkill gpclient || true
+    # Kill all background jobs (like dns_watchdog)
+    kill $(jobs -p) 2>/dev/null || true
+    exit 0
+}
+# Catch Docker stop signals
+trap cleanup SIGTERM SIGINT
+
 log "INFO" "Entrypoint started. Level: $LOG_LEVEL, Mode: $VPN_MODE"
 
 # --- DNS WATCHDOG ---
@@ -84,7 +96,6 @@ if [ -n "$PGID" ]; then groupmod -g "$PGID" gpuser; fi
 # --- 2. NETWORK & MODE DETECTION ---
 log "INFO" "Inspecting network environment..."
 IS_MACVLAN=false
-# Using full path to ip just in case, but PATH export handles it
 if ip -d link show eth0 | grep -q "macvlan"; then
     IS_MACVLAN=true
     log "DEBUG" "Network detection: MACVLAN interface detected."
