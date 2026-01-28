@@ -22,9 +22,8 @@ RUN grep -rl "cannot be run as root" . | xargs sed -i 's/if.*root.*/if false {/'
 # PATCH: Force no_gui mode in gpservice
 RUN sed -i 's/let no_gui = false;/let no_gui = true;/' apps/gpservice/src/cli.rs
 
-# --- COMPILATION (Headless Strategy) ---
-
-# Optimization: Maximize performance and minimize size
+# --- COMPILATION (Optimized) ---
+# Enable Link Time Optimization (LTO) for smaller binaries
 ENV CARGO_PROFILE_RELEASE_LTO=true \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
     CARGO_PROFILE_RELEASE_PANIC=abort
@@ -35,10 +34,10 @@ RUN cargo build --release --bin gpclient --no-default-features
 # 2. Build gpservice
 RUN cargo build --release --bin gpservice
 
-# 3. Build gpauth
+# 3. Build gpauth (Headless)
 RUN cargo build --release --bin gpauth --no-default-features
 
-# Optimization: Strip symbols to reduce size
+# OPTIMIZATION: Strip debug symbols (This is the huge size saver)
 RUN strip target/release/gpclient target/release/gpservice target/release/gpauth
 
 # --- Runtime Stage ---
@@ -53,6 +52,8 @@ RUN apt-get update && apt-get install -y \
     libxml2 libgnutls30t64 liblz4-1 libpsl5 libsecret-1-0 openssl \
     sudo \
     --no-install-recommends && \
+    # Cleanup: Try to remove net-tools if it was pulled as a weak dep
+    apt-get purge -y net-tools || true && \
     rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash gpuser
@@ -61,10 +62,12 @@ RUN useradd -m -s /bin/bash gpuser
 RUN echo "gpuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gpuser && \
     chmod 0440 /etc/sudoers.d/gpuser
 
-# Copy the binaries
-COPY --from=builder /usr/src/app/target/release/gpclient /usr/bin/
-COPY --from=builder /usr/src/app/target/release/gpservice /usr/bin/
-COPY --from=builder /usr/src/app/target/release/gpauth /usr/bin/
+# OPTIMIZATION: Combine COPY instructions to create a single cached layer
+COPY --from=builder \
+    /usr/src/app/target/release/gpclient \
+    /usr/src/app/target/release/gpservice \
+    /usr/src/app/target/release/gpauth \
+    /usr/bin/
 
 # Set capabilities for gpservice
 RUN apt-get update && apt-get install -y libcap2-bin && \
