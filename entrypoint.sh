@@ -39,7 +39,7 @@ log() {
 
     if [ "$should_log" = true ]; then
         local timestamp
-        timestamp=$(date +'%Y-%m-%dT%H:%M:%S')
+        timestamp=$(date +'%Y-%m-%dT%H:%M:%SZ')
         echo "[$timestamp] [$level] $msg" >>"$DEBUG_LOG"
         echo "[$timestamp] [$level] $msg" >&2
     fi
@@ -185,9 +185,16 @@ chmod 644 "$MODE_FILE"
 log "INFO" "Starting Services..."
 dns_watchdog &
 
-# FIX: Use 'runuser' instead of 'su' to avoid intermediate shell PIDs hiding the process.
-# This prevents the Watchdog from accidentally killing a healthy service.
-runuser -u gpuser -- /usr/bin/gpservice >>"$DEBUG_LOG" 2>&1 &
+# FIX: Start gpservice via bash pipe to filter out benign error noise.
+# We use grep --line-buffered to ensure real logs appear instantly.
+# This filters:
+# 1. "Failed to start WS server" (Expected in headless mode)
+# 2. "Error: No such file or directory (os error 2)" (Cleanup artifact)
+runuser -u gpuser -- bash -c "
+    /usr/bin/gpservice 2>&1 | \
+    grep --line-buffered -v -E 'Failed to start WS server|Error: No such file or directory \(os error 2\)' \
+    >> \"$DEBUG_LOG\"
+" &
 
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
     runuser -u gpuser -- microsocks -i 0.0.0.0 -p 1080 >/dev/null 2>&1 &
