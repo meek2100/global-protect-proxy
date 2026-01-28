@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# --- FIX: Ensure administrative commands (ip, iptables) are in PATH ---
+# --- FIX: Ensure administrative commands (ip, iptables, pkill) are in PATH ---
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 # --- CONFIGURATION ---
@@ -11,13 +11,16 @@ MODE_FILE="/tmp/gp-mode"
 PIPE_STDIN="/tmp/gp-stdin"
 PIPE_CONTROL="/tmp/gp-control"
 
-# Defaults
+# Set default timezone if not provided
+: "${TZ:=UTC}"
 : "${LOG_LEVEL:=INFO}"
 : "${VPN_MODE:=standard}"
 : "${DNS_SERVERS:=}"
 : "${GP_ARGS:=}"
 
-# --- LOGGING HELPER ---
+# Apply Timezone
+ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
 declare -A LOG_PRIORITY
 LOG_PRIORITY=( ["TRACE"]=10 ["DEBUG"]=20 ["INFO"]=30 ["WARN"]=40 ["ERROR"]=50 )
 
@@ -33,31 +36,54 @@ log() {
     esac
 
     if [ "$should_log" = true ]; then
-        local timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-        local log_entry="[$timestamp] [$level] $msg"
-        echo "$log_entry" >> "$DEBUG_LOG"
-        echo "$log_entry" >&2
+        local timestamp=$(date +'%Y-%m-%dT%H:%M:%S')
+        echo "[$timestamp] [$level] $msg" >> "$DEBUG_LOG"
+        echo "[$timestamp] [$level] $msg" >&2
     fi
 }
 
-# --- GRACEFUL SHUTDOWN TRAP ---
+# --- GRACEFUL SHUTDOWN ---
 cleanup() {
-    log "WARN" "Received Shutdown Signal (SIGTERM/SIGINT)"
-    log "INFO" "Killing gpclient..."
+    log "WARN" "Received Shutdown Signal"
     sudo pkill gpclient || true
-    # Kill all background jobs (like dns_watchdog)
     kill $(jobs -p) 2>/dev/null || true
     exit 0
 }
-# Catch Docker stop signals
 trap cleanup SIGTERM SIGINT
 
 log "INFO" "Entrypoint started. Level: $LOG_LEVEL, Mode: $VPN_MODE"
 
+# --- WATCHDOG & MAINTENANCE ---
+check_services() {
+    # 1. Critical: Web UI (Python)
+    if ! pgrep -f server.py > /dev/null; then
+        log "ERROR" "CRITICAL: Web UI (server.py) died. Exiting to trigger restart."
+        exit 1
+    fi
+
+    # 2. Critical: GlobalProtect Service
+    if ! pgrep -u gpuser gpservice > /dev/null; then
+        log "ERROR" "CRITICAL: gpservice died. Exiting to trigger restart."
+        exit 1
+    fi
+
+    # 3. Resilient: Microsocks (Restart if dead)
+    if [ "$VPN_MODE" != "gateway" ]; then
+        if ! pgrep -u gpuser microsocks > /dev/null; then
+            log "WARN" "Microsocks crashed. Restarting..."
+            su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
+        fi
+    fi
+
+    # 4. Maintenance: Log Rotation (Limit debug log to ~5MB)
+    if [ -f "$DEBUG_LOG" ] && [ $(stat -c%s "$DEBUG_LOG") -gt 5242880 ]; then
+        echo "[SYSTEM] Log rotated due to size limit." > "$DEBUG_LOG"
+    fi
+}
+
 # --- DNS WATCHDOG ---
 dns_watchdog() {
     local last_dns=""
-    log "INFO" "Starting DNS Watchdog..."
     while true; do
         local current_dns=""
         if [ -f /etc/resolv.conf ]; then
@@ -74,7 +100,7 @@ dns_watchdog() {
 
         if [ -n "$current_dns" ] && [ "$current_dns" != "$last_dns" ]; then
             if [[ "$current_dns" != "8.8.8.8" && "$current_dns" != "1.1.1.1" ]]; then
-                log "INFO" "VPN DNS Detected: $current_dns. Enabling Transparent Forwarding..."
+                log "INFO" "VPN DNS Detected: $current_dns. Enabling Forwarding..."
                 if [ -n "$last_dns" ]; then
                     iptables -t nat -D PREROUTING -i eth0 -p udp --dport 53 -j DNAT --to-destination "$last_dns" 2>/dev/null || true
                     iptables -t nat -D PREROUTING -i eth0 -p tcp --dport 53 -j DNAT --to-destination "$last_dns" 2>/dev/null || true
@@ -82,7 +108,6 @@ dns_watchdog() {
                 iptables -t nat -A PREROUTING -i eth0 -p udp --dport 53 -j DNAT --to-destination "$current_dns"
                 iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 53 -j DNAT --to-destination "$current_dns"
                 last_dns="$current_dns"
-                log "INFO" "DNS Forwarding Active."
             fi
         fi
         sleep 5
@@ -112,64 +137,44 @@ if [ "$VPN_MODE" == "gateway" ] || [ "$VPN_MODE" == "standard" ]; then
     fi
 fi
 
-log "INFO" "Final Operational Mode: $VPN_MODE"
-
 # --- 3. DNS CONFIGURATION ---
 DNS_TO_APPLY=""
 if [ -n "$DNS_SERVERS" ]; then
     log "INFO" "Custom DNS configuration found: $DNS_SERVERS"
     DNS_TO_APPLY=$(echo "$DNS_SERVERS" | tr ',' ' ')
 elif [ "$IS_MACVLAN" = true ]; then
-    log "INFO" "Macvlan detected without custom DNS. Applying fallback defaults (Google/Cloudflare)."
+    log "INFO" "Macvlan detected. Applying fallback defaults."
     DNS_TO_APPLY="8.8.8.8 1.1.1.1"
 fi
 
 if [ -n "$DNS_TO_APPLY" ]; then
-    log "INFO" "Overwriting /etc/resolv.conf with: $DNS_TO_APPLY"
+    log "INFO" "Overwriting /etc/resolv.conf"
     echo "options ndots:0" > /etc/resolv.conf
     for ip in $DNS_TO_APPLY; do
         echo "nameserver $ip" >> /etc/resolv.conf
     done
-else
-    log "INFO" "Using System/Docker DNS settings (No override)."
 fi
 
-# --- 4. NETWORK SETUP (Root) ---
-log "INFO" "Configuring Networking..."
-
-if [ "$VPN_MODE" = "gateway" ] || [ "$VPN_MODE" = "standard" ]; then
-    if [ "$(cat /proc/sys/net/ipv4/ip_forward)" = "1" ]; then
-        log "DEBUG" "IP Forwarding is already enabled."
-    else
-        echo 1 > /proc/sys/net/ipv4/ip_forward || log "ERROR" "Could not write to ip_forward."
-    fi
-else
-    log "DEBUG" "Skipping IP Forwarding (Not required for SOCKS)."
-fi
-
+# --- 4. NETWORK SETUP ---
 iptables -F
 iptables -t nat -F
 iptables -A INPUT -p tcp --dport 8001 -j ACCEPT
+
+if [ "$VPN_MODE" = "gateway" ] || [ "$VPN_MODE" = "standard" ]; then
+    if [ "$(cat /proc/sys/net/ipv4/ip_forward)" != "1" ]; then
+        echo 1 > /proc/sys/net/ipv4/ip_forward
+    fi
+    iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
+    iptables -A FORWARD -i eth0 -o tun0 -j ACCEPT
+    iptables -A FORWARD -i tun0 -o eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+fi
 
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
     iptables -A INPUT -p tcp --dport 1080 -j ACCEPT
     iptables -A INPUT -p udp --dport 1080 -j ACCEPT
 fi
 
-if [ "$VPN_MODE" = "gateway" ] || [ "$VPN_MODE" = "standard" ]; then
-    log "INFO" "Applying NAT (Masquerade) rules..."
-    iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
-    iptables -A FORWARD -i eth0 -o tun0 -j ACCEPT
-    iptables -A FORWARD -i tun0 -o eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
-else
-    log "DEBUG" "Skipping NAT rules."
-fi
-
-log "INFO" "Network setup complete."
-
 # --- 5. INIT ENVIRONMENT ---
-log "INFO" "Initializing Environment..."
-
 rm -f "$PIPE_STDIN" "$PIPE_CONTROL" "$MODE_FILE"
 mkfifo "$PIPE_STDIN" "$PIPE_CONTROL"
 mkdir -p /tmp/gp-logs
@@ -178,47 +183,47 @@ chown -R gpuser:gpuser /tmp/gp-logs /var/www/html "$PIPE_STDIN" "$PIPE_CONTROL"
 echo "idle" > "$MODE_FILE"
 chmod 644 "$MODE_FILE"
 
-# --- 6. START SERVICES (As gpuser) ---
-log "INFO" "Starting Services as gpuser..."
-
-# Start DNS Watchdog in background
+# --- 6. START SERVICES ---
+log "INFO" "Starting Services..."
 dns_watchdog &
-
-log "INFO" "Starting GlobalProtect Service (gpservice)..."
 su - gpuser -c "/usr/bin/gpservice >> \"$DEBUG_LOG\" 2>&1 &"
 
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
-    log "INFO" "Starting Microsocks on port 1080..."
     su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
-else
-    log "INFO" "Microsocks disabled by mode '$VPN_MODE'."
 fi
 
-log "INFO" "Starting Python Control Server..."
-su - gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
+# OPTIMIZATION: Use -u for unbuffered Python output (Real-time logs)
+su - gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 -u /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
 
-# --- 7. MAIN CONTROL LOOP ---
+# Log Streaming
+if [[ "$LOG_LEVEL" == "DEBUG" || "$LOG_LEVEL" == "TRACE" ]]; then
+    log "INFO" "Debug mode enabled. Streaming internal logs to stdout..."
+    tail -f "$LOG_FILE" "$DEBUG_LOG" &
+fi
+
+# --- 7. MAIN LOOP ---
 while true; do
-    log "DEBUG" "Waiting for start signal..."
-    read _ < "$PIPE_CONTROL"
+    # Run Watchdog checks
+    check_services
 
-    log "INFO" "Signal received. Starting gpclient..."
-    echo "active" > "$MODE_FILE"
+    # Non-blocking check for start signal (timeout 2s)
+    if read -t 2 _ < "$PIPE_CONTROL"; then
+        log "INFO" "Signal received. Starting gpclient..."
+        echo "active" > "$MODE_FILE"
 
-    su - gpuser -c "
-        export VPN_PORTAL=\"$VPN_PORTAL\"
-        export GP_ARGS=\"$GP_ARGS\"
-        > \"$LOG_FILE\"
-        exec 3<> \"$PIPE_STDIN\"
+        su - gpuser -c "
+            export VPN_PORTAL=\"$VPN_PORTAL\"
+            export GP_ARGS=\"$GP_ARGS\"
+            > \"$LOG_FILE\"
+            exec 3<> \"$PIPE_STDIN\"
 
-        CMD=\"sudo stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
+            CMD=\"sudo stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
 
-        echo \"[Entrypoint] Running: \$CMD\" >> \"$DEBUG_LOG\"
+            echo \"[Entrypoint] Executing: \$CMD\" >> \"$DEBUG_LOG\"
+            script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1
+        "
 
-        script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1
-    "
-
-    log "WARN" "gpclient process exited."
-    echo "idle" > "$MODE_FILE"
-    sleep 2
+        log "WARN" "gpclient exited."
+        echo "idle" > "$MODE_FILE"
+    fi
 done

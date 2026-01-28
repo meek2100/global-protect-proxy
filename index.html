@@ -3,314 +3,580 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GlobalProtect VPN</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GlobalProtect Proxy</title>
     <style>
+        /* --- DESIGN SYSTEM --- */
+        :root {
+            /* Light Theme (Default) */
+            --bg-body: #f8fafc;
+            --bg-card: #ffffff;
+            --text-primary: #0f172a;
+            --text-secondary: #64748b;
+            --border-color: #e2e8f0;
+            --input-bg: #ffffff;
+            --accent-blue: #2563eb;
+            --accent-hover: #1d4ed8;
+            --accent-red: #ef4444;
+            --accent-red-hover: #dc2626;
+            --accent-green: #10b981;
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+            --font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --radius-md: 12px;
+            --radius-full: 9999px;
+        }
+
+        /* Dark Theme Override */
+        [data-theme="dark"] {
+            --bg-body: #0f172a;
+            --bg-card: #1e293b;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --border-color: #334155;
+            --input-bg: #0f172a;
+            --accent-blue: #3b82f6;
+            --accent-hover: #60a5fa;
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.5);
+            --shadow-lg: 0 20px 25px -5px rgb(0 0 0 / 0.5), 0 8px 10px -6px rgb(0 0 0 / 0.5);
+        }
+
+        /* --- GLOBAL LAYOUT --- */
+        html,
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #f4f6f8;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: var(--font-family);
+            background-color: var(--bg-body);
+            color: var(--text-primary);
+            transition: background-color 0.3s ease, color 0.3s ease;
             display: flex;
             justify-content: center;
-            padding-top: 50px;
-            color: #333;
+            align-items: center;
+        }
+
+        /* --- RESPONSIVE CONTAINER --- */
+        .app-container {
+            width: 100%;
+            padding: 16px;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: center;
         }
 
         .card {
-            background: white;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
             width: 100%;
-            max-width: 600px;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            text-align: center;
+            max-width: 440px;
+            /* Optimal reading width */
+            padding: 40px 32px;
             position: relative;
-            /* Required for absolute positioning of the icon */
+            text-align: center;
+            transition: all 0.3s ease;
         }
 
-        /* --- NEW: Universal Restart Icon --- */
-        .restart-icon {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: none;
-            border: none;
-            font-size: 24px;
-            color: #ccc;
-            cursor: pointer;
-            transition: color 0.2s, transform 0.2s;
-            padding: 5px;
-            line-height: 1;
-            border-radius: 50%;
+        /* Large Screens (4K TV / Ultrawide) - Scale up slightly */
+        @media (min-width: 2500px) {
+            .card {
+                max-width: 600px;
+                padding: 60px 48px;
+                transform: scale(1.1);
+            }
+
+            body {
+                font-size: 18px;
+            }
         }
 
-        .restart-icon:hover {
-            color: #dc3545;
-            /* Red on hover to indicate destructive action */
-            background-color: #f8d7da;
-            transform: rotate(90deg);
+        /* Mobile - Maximize space */
+        @media (max-width: 480px) {
+            .app-container {
+                padding: 0;
+                height: 100%;
+                align-items: flex-start;
+            }
+
+            .card {
+                border: none;
+                box-shadow: none;
+                border-radius: 0;
+                padding: 24px;
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+            }
+        }
+
+        /* --- HEADER & CONTROLS --- */
+        .card-header {
+            margin-bottom: 32px;
+            position: relative;
         }
 
         h1 {
-            margin-top: 0;
-            font-size: 24px;
-            color: #2c3e50;
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+            margin: 0 0 8px 0;
         }
 
-        .status-badge {
-            display: inline-block;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: bold;
-            margin-bottom: 20px;
+        .subtitle {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            margin: 0;
         }
 
-        .status-idle {
-            background: #e0e0e0;
-            color: #555;
+        .control-group {
+            position: absolute;
+            top: 0;
+            right: 0;
+            display: flex;
+            gap: 8px;
         }
 
-        .status-connecting {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .status-auth {
-            background: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
-        }
-
-        .status-input {
-            background: #cce5ff;
-            color: #004085;
-            border: 1px solid #b8daff;
-        }
-
-        .status-connected {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .status-error {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .btn {
-            display: inline-block;
-            padding: 12px 24px;
-            font-size: 16px;
-            font-weight: 600;
-            text-decoration: none;
-            border-radius: 6px;
+        .icon-btn {
+            background: transparent;
             border: none;
+            color: var(--text-secondary);
             cursor: pointer;
-            transition: background 0.2s;
+            padding: 8px;
+            border-radius: var(--radius-full);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .icon-btn:hover {
+            background-color: var(--bg-body);
+            color: var(--text-primary);
+        }
+
+        .icon-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* --- STATUS BADGES --- */
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 16px;
+            border-radius: var(--radius-full);
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            margin-bottom: 32px;
+            border: 1px solid transparent;
+        }
+
+        .badge.idle {
+            background: var(--bg-body);
+            color: var(--text-secondary);
+            border-color: var(--border-color);
+        }
+
+        .badge.connecting {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--accent-blue);
+            border-color: rgba(59, 130, 246, 0.2);
+        }
+
+        .badge.connected {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--accent-green);
+            border-color: rgba(16, 185, 129, 0.2);
+        }
+
+        .badge.error {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--accent-red);
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+
+        /* --- BUTTONS & INPUTS --- */
+        .btn {
             width: 100%;
+            padding: 14px;
+            border-radius: var(--radius-md);
+            border: none;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s, box-shadow 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-decoration: none;
             box-sizing: border-box;
-            margin: 10px 0;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
         }
 
         .btn-primary {
-            background-color: #007bff;
+            background-color: var(--accent-blue);
             color: white;
+            box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
         }
 
-        .btn-primary:hover {
-            background-color: #0056b3;
+        .btn-primary:hover:not(:disabled) {
+            background-color: var(--accent-hover);
+            box-shadow: 0 6px 8px -1px rgba(37, 99, 235, 0.3);
         }
 
-        .btn-success {
-            background-color: #28a745;
-            color: white;
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: wait;
         }
 
-        .btn-success:hover {
-            background-color: #218838;
+        .btn-secondary {
+            background-color: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            margin-bottom: 16px;
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--text-secondary);
+            background-color: var(--bg-body);
         }
 
         .btn-danger {
-            background-color: #dc3545;
-            color: white;
+            background-color: transparent;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: var(--accent-red);
         }
 
         .btn-danger:hover {
-            background-color: #c82333;
+            background-color: rgba(239, 68, 68, 0.05);
+            border-color: var(--accent-red);
         }
 
-        /* Disabled State for the Link */
-        .btn-disabled {
-            background-color: #6c757d !important;
-            cursor: not-allowed;
-            opacity: 0.6;
-            pointer-events: none;
-        }
-
-        input[type="text"],
-        input[type="password"],
+        input,
         select {
             width: 100%;
-            padding: 12px;
-            border: 1px solid #ced4da;
-            border-radius: 6px;
+            padding: 14px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            background-color: var(--input-bg);
+            color: var(--text-primary);
+            font-size: 1rem;
+            margin-bottom: 16px;
             box-sizing: border-box;
-            margin-bottom: 10px;
-            font-size: 14px;
-            background: #fff;
+            outline: none;
+            transition: border-color 0.2s;
         }
 
-        .instruction-box {
-            text-align: left;
-            background: #f8f9fa;
-            border-left: 4px solid #007bff;
-            padding: 15px;
-            margin: 15px 0;
-            font-size: 14px;
-            line-height: 1.5;
+        input:focus,
+        select:focus {
+            border-color: var(--accent-blue);
         }
 
-        #debug-box {
-            margin-top: 20px;
-            text-align: left;
-            background: #2d2d2d;
-            color: #ccc;
-            padding: 15px;
-            border-radius: 6px;
-            font-family: monospace;
-            font-size: 12px;
-            overflow-x: auto;
-            white-space: pre-wrap;
-            max-height: 300px;
-            display: none;
-        }
-
+        /* --- STATES & UTILS --- */
         .hidden {
             display: none !important;
         }
 
         .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3498db;
+            width: 24px;
+            height: 24px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent-blue);
             border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 10px auto;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 24px auto;
         }
 
         @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
+            to {
                 transform: rotate(360deg);
             }
+        }
+
+        .instruction-box {
+            text-align: left;
+            background: var(--bg-body);
+            padding: 16px;
+            border-radius: var(--radius-md);
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+            border: 1px solid var(--border-color);
+        }
+
+        .instruction-box ol {
+            padding-left: 20px;
+            margin: 0;
+        }
+
+        .instruction-box li {
+            margin-bottom: 8px;
+        }
+
+        /* --- DEBUG CONSOLE --- */
+        #debug-panel {
+            margin-top: 32px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 16px;
+        }
+
+        .debug-toggle {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            background: none;
+            border: none;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        #debug-log {
+            background: #0f172a;
+            color: #10b981;
+            font-family: 'Menlo', monospace;
+            font-size: 0.75rem;
+            padding: 16px;
+            border-radius: var(--radius-md);
+            text-align: left;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            max-height: 200px;
+            margin-top: 12px;
         }
     </style>
 </head>
 
 <body>
-    <div class="card">
-        <button class="restart-icon" onclick="confirmRestart()" title="Force Restart / Reset Connection">
-            &#x21bb; </button>
 
-        <h1>GlobalProtect VPN</h1>
-        <div id="status-badge" class="status-badge status-idle">Loading...</div>
+    <div class="app-container">
+        <div class="card">
 
-        <div id="view-idle" class="hidden">
-            <p>VPN service is ready.</p>
-            <button onclick="triggerConnect()" class="btn btn-primary">Connect to VPN</button>
-        </div>
-
-        <div id="view-connecting" class="hidden">
-            <div class="spinner"></div>
-            <p id="connecting-text">Initializing connection...</p>
-            <small id="connecting-subtext">Scanning logs for authentication URL...</small>
-        </div>
-
-        <div id="view-auth" class="hidden">
-            <h3>Authentication Required</h3>
-            <div class="instruction-box">
-                <strong>Step 1:</strong> Click the button below to log in via SSO.<br>
-                <strong>Step 2:</strong> On the "Authentication Complete" page, look for the text "click here to launch
-                GlobalProtect".<br>
-                <strong>Step 3:</strong> Right-click that link, choose <b>"Copy Link Address"</b>, and paste it below.
+            <div class="card-header">
+                <div class="control-group">
+                    <button class="icon-btn" id="theme-toggle" title="Toggle Theme" onclick="toggleTheme()">
+                        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="5"></circle>
+                            <line x1="12" y1="1" x2="12" y2="3"></line>
+                            <line x1="12" y1="21" x2="12" y2="23"></line>
+                            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                            <line x1="1" y1="12" x2="3" y2="12"></line>
+                            <line x1="21" y1="12" x2="23" y2="12"></line>
+                            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" title="Force Reset" onclick="confirmReset()"
+                        style="color: var(--accent-red);">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                            <line x1="12" y1="2" x2="12" y2="12"></line>
+                        </svg>
+                    </button>
+                </div>
+                <h1>GlobalProtect</h1>
+                <p class="subtitle">Secure Proxy Gateway</p>
             </div>
 
-            <a id="sso-link" href="#" target="_blank" class="btn btn-success" onclick="handleLinkClick(this)">Open Login
-                Page</a>
+            <div id="status-badge" class="badge idle">
+                <span class="status-dot" style="background: currentColor;"></span>
+                <span id="badge-text">System Ready</span>
+            </div>
 
-            <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
+            <div id="view-idle" class="hidden">
+                <p style="margin-bottom: 32px;">Ready to establish secure tunnel.</p>
+                <button onclick="triggerConnect()" class="btn btn-primary">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                        <polyline points="13 2 13 9 20 9"></polyline>
+                    </svg>
+                    Connect to VPN
+                </button>
+            </div>
 
-            <form id="auth-form" onsubmit="handleFormSubmit(event)">
-                <input type="text" id="cb_url" name="callback_url"
-                    placeholder="Paste globalprotectcallback:// link here..." required autocomplete="off">
-                <button type="submit" class="btn btn-primary">Submit Code</button>
-            </form>
+            <div id="view-connecting" class="hidden">
+                <div class="spinner"></div>
+                <h3 style="font-size: 1.1rem; margin-bottom: 8px;">Connecting...</h3>
+                <p id="connecting-subtext">Initializing handshake protocol</p>
+            </div>
+
+            <div id="view-auth" class="hidden">
+                <h3 style="font-size: 1.1rem; margin-bottom: 16px;">Authentication Required</h3>
+                <div class="instruction-box">
+                    <ol>
+                        <li>Click <strong>Open SSO Login</strong> below.</li>
+                        <li>Complete sign-in in the new window.</li>
+                        <li>Right-click the "Click here to launch" link.</li>
+                        <li>Select <strong>Copy Link Address</strong> and paste below.</li>
+                    </ol>
+                </div>
+
+                <a id="sso-link" href="#" target="_blank" class="btn btn-secondary" onclick="handleLinkClick(this)">
+                    Open SSO Login <svg style="margin-left:4px" viewBox="0 0 24 24" width="14" height="14" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                        <polyline points="15 3 21 3 21 9"></polyline>
+                        <line x1="10" y1="14" x2="21" y2="3"></line>
+                    </svg>
+                </a>
+
+                <form id="auth-form" onsubmit="handleFormSubmit(event)">
+                    <input type="text" name="callback_url" placeholder="Paste globalprotectcallback:// link..." required
+                        autocomplete="off">
+                    <button type="submit" class="btn btn-primary">Verify Credentials</button>
+                </form>
+            </div>
+
+            <div id="view-input" class="hidden">
+                <h3 style="font-size: 1.1rem; margin-bottom: 16px;">Additional Input</h3>
+                <p id="input-prompt" style="margin-bottom: 24px;">Please provide the requested information.</p>
+                <form id="input-form" onsubmit="handleFormSubmit(event)">
+                    <div id="dynamic-input-container"></div>
+                    <button type="submit" class="btn btn-primary">Submit Response</button>
+                </form>
+            </div>
+
+            <div id="view-connected" class="hidden">
+                <div style="margin-bottom: 32px;">
+                    <svg style="color: var(--accent-green); width: 64px; height: 64px;" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    </svg>
+                </div>
+                <h2 style="font-size: 1.25rem; margin-bottom: 8px;">Tunnel Active</h2>
+                <p>Traffic is routing via SOCKS5 :1080</p>
+                <div style="height: 24px;"></div>
+                <button onclick="triggerDisconnect()" class="btn btn-danger">Disconnect</button>
+            </div>
+
+            <div id="view-error" class="hidden">
+                <div style="margin-bottom: 24px; color: var(--accent-red);">
+                    <svg style="width: 48px; height: 48px;" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="1.5">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                </div>
+                <h3 style="color: var(--accent-red); margin-bottom: 8px;">Connection Failed</h3>
+                <p id="error-message" style="margin-bottom: 32px;">An unexpected error occurred.</p>
+                <button onclick="triggerConnect()" class="btn btn-primary">Retry Connection</button>
+            </div>
+
+            <div id="debug-section" class="hidden"
+                style="margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                <a href="/download_logs" class="debug-toggle">Download Logs</a>
+                <button class="debug-toggle" onclick="toggleDebug()">Toggle Console</button>
+            </div>
+            <div id="debug-log" class="hidden"></div>
+
         </div>
-
-        <div id="view-input" class="hidden">
-            <h3 id="input-title">Additional Input Required</h3>
-            <div class="instruction-box" id="input-prompt">Please follow instructions.</div>
-
-            <form id="input-form" onsubmit="handleFormSubmit(event)">
-                <label for="user_input"
-                    style="display:block; text-align:left; margin-bottom:5px; font-weight:bold;">Response:</label>
-                <div id="dynamic-input-container"></div>
-                <button type="submit" class="btn btn-primary">Send Response</button>
-            </form>
-        </div>
-
-        <div id="view-error" class="hidden">
-            <div style="font-size: 50px; margin-bottom: 10px;">⚠️</div>
-            <p style="color:#721c24"><strong>Connection Failed</strong></p>
-            <p id="error-message">Unknown Error</p>
-            <button onclick="triggerConnect()" class="btn btn-primary">Retry Connection</button>
-        </div>
-
-        <div id="view-connected" class="hidden">
-            <div style="font-size: 50px; margin-bottom: 10px;">✅</div>
-            <p><strong>Secure Connection Active</strong></p>
-            <p>SOCKS5 Proxy: <code>Port 1080</code></p>
-            <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
-            <button onclick="triggerDisconnect()" class="btn btn-danger">Disconnect / Logout</button>
-        </div>
-
-        <div style="margin-top:20px; display: flex; justify-content: space-between; align-items: center;">
-            <a href="#" onclick="toggleDebug(); return false;" style="font-size:12px; color:#999;">Toggle Logs</a>
-            <a href="/download_logs" style="font-size:12px; color:#007bff; text-decoration: none;">Download Full Logs
-                ⬇</a>
-        </div>
-        <div id="debug-box"></div>
     </div>
 
     <script>
-        window.currentVpnState = null;
+        // --- THEME ENGINE ---
+        const themeToggleBtn = document.getElementById('theme-toggle');
 
-        // --- NEW: Handle Restart Icon Click ---
-        function confirmRestart() {
-            if (confirm("Force Restart: This will kill the current VPN process and start over. Continue?")) {
-                triggerConnect();
+        function initTheme() {
+            const stored = localStorage.getItem('theme');
+            if (stored) {
+                document.documentElement.setAttribute('data-theme', stored);
+            } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+            updateThemeIcon();
+        }
+
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme');
+            const next = current === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+            updateThemeIcon();
+        }
+
+        function updateThemeIcon() {
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            // Simple SVG swap logic could go here, for now we keep the sun/moon unified or simplified
+            themeToggleBtn.innerHTML = isDark
+                ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>' // Moon
+                : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>'; // Sun
+        }
+
+        // --- APP LOGIC ---
+        window.vpnState = null;
+
+        function setView(viewId) {
+            ['idle', 'connecting', 'auth', 'input', 'connected', 'error'].forEach(id => {
+                document.getElementById(`view-${id}`).classList.add('hidden');
+            });
+            document.getElementById(`view-${viewId}`).classList.remove('hidden');
+        }
+
+        function setBadge(text, type) {
+            const badge = document.getElementById('status-badge');
+            const txt = document.getElementById('badge-text');
+            badge.className = `badge ${type}`;
+            txt.innerText = text;
+        }
+
+        async function triggerConnect() {
+            setBadge("Starting...", "connecting");
+            setView("connecting");
+            document.getElementById('connecting-subtext').innerText = "Initializing environment...";
+
+            // Reset Link UI
+            const link = document.getElementById('sso-link');
+            link.classList.remove('btn-disabled');
+            link.innerHTML = 'Open SSO Login <svg style="margin-left:4px" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>';
+
+            await fetch('/connect', { method: 'POST' });
+        }
+
+        async function triggerDisconnect() {
+            if (confirm("Disconnect VPN session?")) {
+                setBadge("Disconnecting...", "idle");
+                await fetch('/disconnect', { method: 'POST' });
+            }
+        }
+
+        async function confirmReset() {
+            if (confirm("Force reset process? This will kill the VPN.")) {
+                setBadge("Resetting...", "idle");
+                await fetch('/disconnect', { method: 'POST' });
+                window.vpnState = null;
             }
         }
 
         async function handleFormSubmit(event) {
             event.preventDefault();
-
             const form = event.target;
             const btn = form.querySelector('button[type="submit"]');
             const originalText = btn.innerText;
 
-            btn.innerText = "Sending...";
             btn.disabled = true;
+            btn.innerText = "Verifying...";
 
             const formData = new FormData(form);
             const params = new URLSearchParams();
-            for (const pair of formData) {
-                params.append(pair[0], pair[1]);
-            }
+            for (const pair of formData) params.append(pair[0], pair[1]);
 
             try {
                 const resp = await fetch('/submit', {
@@ -319,82 +585,75 @@
                     body: params.toString()
                 });
 
-                if (!resp.ok) throw new Error("Server rejected input");
+                if (!resp.ok) throw new Error("Submission rejected");
 
-                document.getElementById('view-auth').classList.add('hidden');
-                document.getElementById('view-input').classList.add('hidden');
-
-                const connectingView = document.getElementById('view-connecting');
-                connectingView.classList.remove('hidden');
-                document.getElementById('connecting-text').innerText = "Verifying Response...";
-                document.getElementById('connecting-subtext').innerText = "Please wait while the server processes your input.";
-                document.getElementById('status-badge').innerText = "VERIFYING...";
-                document.getElementById('status-badge').className = "status-badge status-connecting";
-
+                setView('connecting');
+                setBadge("Verifying...", "connecting");
+                document.getElementById('connecting-subtext').innerText = "Sending response to gateway...";
                 form.reset();
-
             } catch (e) {
-                alert("Error submitting data: " + e.message);
-                btn.innerText = originalText;
+                alert("Error: " + e.message);
                 btn.disabled = false;
-            }
-        }
-
-        async function triggerConnect() {
-            document.getElementById('status-badge').innerText = "STARTING...";
-            document.getElementById('view-error').classList.add('hidden');
-
-            document.getElementById('connecting-text').innerText = "Initializing connection...";
-            document.getElementById('connecting-subtext').innerText = "Scanning logs for authentication URL...";
-
-            const link = document.getElementById('sso-link');
-            if (link) {
-                link.classList.remove('btn-disabled');
-                link.innerText = "Open Login Page";
-                link.style.pointerEvents = '';
-                link.style.opacity = '';
-            }
-
-            await fetch('/connect', { method: 'POST' });
-        }
-
-        async function triggerDisconnect() {
-            if (confirm("Are you sure you want to disconnect?")) {
-                document.getElementById('status-badge').innerText = "DISCONNECTING...";
-                await fetch('/disconnect', { method: 'POST' });
+                btn.innerText = originalText;
             }
         }
 
         function handleLinkClick(el) {
             el.classList.add('btn-disabled');
-            el.innerText = "Link Opened (Single Use)";
+            el.innerText = "Link Opened";
         }
 
         function toggleDebug() {
-            const d = document.getElementById('debug-box');
-            d.style.display = (d.style.display === 'none' || d.style.display === '') ? 'block' : 'none';
+            const box = document.getElementById('debug-log');
+            box.classList.toggle('hidden');
         }
 
         async function updateStatus() {
             try {
-                const response = await fetch('/status.json?t=' + Date.now());
-                const data = await response.json();
+                const res = await fetch('/status.json?t=' + Date.now());
+                const data = await res.json();
 
-                if (window.currentVpnState !== data.state) {
-                    ['idle', 'connecting', 'auth', 'input', 'connected', 'error'].forEach(id => {
-                        const el = document.getElementById(`view-${id}`);
-                        if (el) el.classList.add('hidden');
-                    });
-
-                    const activeView = document.getElementById(`view-${data.state}`);
-                    if (activeView) activeView.classList.remove('hidden');
-
-                    const badge = document.getElementById('status-badge');
-                    badge.className = `status-badge status-${data.state}`;
-                    badge.innerText = data.state.toUpperCase();
-                    window.currentVpnState = data.state;
+                // 1. Debug Visibility
+                const debugSec = document.getElementById('debug-section');
+                if (data.debug_mode) {
+                    if (debugSec.classList.contains('hidden')) debugSec.classList.remove('hidden');
+                    document.getElementById('debug-log').innerText = data.log || "Waiting for logs...";
+                    debugSec.style.display = 'flex'; // Ensure flex layout
+                } else {
+                    debugSec.classList.add('hidden');
+                    debugSec.style.display = 'none';
                 }
 
+                // 2. State Transition
+                // Avoid jitter if manual Verify state is active
+                const isManual = document.getElementById('badge-text').innerText === "Verifying...";
+                if (isManual && (data.state === 'auth' || data.state === 'input')) return;
+
+                if (window.vpnState !== data.state) {
+                    setView(data.state);
+
+                    const labels = {
+                        idle: "System Ready",
+                        connecting: "Connecting...",
+                        auth: "Auth Required",
+                        input: "Input Required",
+                        connected: "Connected",
+                        error: "Error"
+                    };
+
+                    setBadge(labels[data.state] || data.state, data.state);
+                    window.vpnState = data.state;
+
+                    // Reset button state if we returned to form
+                    if (['auth', 'input'].includes(data.state)) {
+                        document.querySelectorAll('button[type="submit"]').forEach(btn => {
+                            btn.disabled = false;
+                            btn.innerText = btn.closest('#auth-form') ? "Verify Credentials" : "Submit Response";
+                        });
+                    }
+                }
+
+                // 3. Dynamic Data
                 if (data.state === 'auth' && data.url) {
                     const link = document.getElementById('sso-link');
                     if (!link.classList.contains('btn-disabled') && link.getAttribute('href') !== data.url) {
@@ -403,41 +662,36 @@
                 }
 
                 if (data.state === 'error') {
-                    document.getElementById('error-message').innerText = data.error || "Check logs for details.";
+                    document.getElementById('error-message').innerText = data.error || "Unknown error.";
                 }
 
                 if (data.state === 'input') {
                     document.getElementById('input-prompt').innerText = data.prompt;
                     const container = document.getElementById('dynamic-input-container');
-
                     if (!container.innerHTML) {
                         let html = '';
-                        if (data.input_type === 'select' && data.options && data.options.length > 0) {
-                            html = '<select name="user_input" id="user_input">';
-                            data.options.forEach(opt => { html += `<option value="${opt}">${opt}</option>`; });
+                        if (data.input_type === 'select') {
+                            html = '<select name="user_input">';
+                            (data.options || []).forEach(opt => html += `<option value="${opt}">${opt}</option>`);
                             html += '</select>';
-                        } else if (data.input_type === 'password') {
-                            html = '<input type="password" name="user_input" id="user_input" placeholder="Enter Password..." required autocomplete="off">';
                         } else {
-                            html = '<input type="text" name="user_input" id="user_input" placeholder="Type answer here..." required autocomplete="off">';
+                            const type = data.input_type === 'password' ? 'password' : 'text';
+                            html = `<input type="${type}" name="user_input" required autocomplete="off">`;
                         }
                         container.innerHTML = html;
                     }
                 }
 
-                if (data.log) {
-                    const debugBox = document.getElementById('debug-box');
-                    debugBox.innerText = `--- SERVER DECISION ---\n${data.debug || ''}\n\n--- VPN LOGS ---\n${data.log}`;
-                }
-
             } catch (e) {
-                console.error("Poll failed", e);
-                const debugBox = document.getElementById('debug-box');
-                if (debugBox) debugBox.innerText = `Connection Error: ${e.message}`;
+                console.error(e);
             }
         }
+
+        // Init
+        initTheme();
         setInterval(updateStatus, 1500);
         updateStatus();
+
     </script>
 </body>
 

@@ -50,9 +50,10 @@ FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 # MINIMAL RUNTIME DEPENDENCIES
-# Added 'procps' to provide 'pkill' command (Critical for disconnect/reset)
+# - tzdata: For correct log timestamps
+# - procps: For pkill (process management)
 RUN apt-get update && apt-get install -y \
-    microsocks python3 iptables iproute2 util-linux procps \
+    microsocks python3 iptables iproute2 util-linux procps tzdata \
     vpnc-scripts ca-certificates \
     libxml2 libgnutls30t64 liblz4-1 libpsl5 libsecret-1-0 openssl \
     sudo \
@@ -61,8 +62,9 @@ RUN apt-get update && apt-get install -y \
 
 RUN useradd -m -s /bin/bash gpuser
 
-# Configure passwordless sudo for gpuser
-RUN echo "gpuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gpuser && \
+# SECURITY: Least Privilege Sudo
+# Only allow gpclient and pkill. Deny everything else.
+RUN echo "gpuser ALL=(root) NOPASSWD: /usr/bin/gpclient, /usr/bin/pkill" > /etc/sudoers.d/gpuser && \
     chmod 0440 /etc/sudoers.d/gpuser
 
 # Combine COPY instructions
@@ -87,7 +89,7 @@ RUN chmod +x /entrypoint.sh
 
 ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
 
-# Add Healthcheck
+# Healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8001/status.json').getcode())" || exit 1
 
