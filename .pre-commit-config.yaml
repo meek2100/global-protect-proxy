@@ -2,7 +2,7 @@
 exclude: ^(.*\.min\.(css|js))
 
 repos:
-  # 1. FAST SYNTAX CHECKS (Fail fast)
+  # 1. FAST SYNTAX CHECKS
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -23,18 +23,18 @@ repos:
       - id: check-executables-have-shebangs
       - id: check-shebang-scripts-are-executable
 
-  # 2. FILE HEADERS (Modifies files, so run early)
+  # 2. FILE HEADERS
   - repo: https://github.com/meek2100/pre-commit-context-header
     rev: v0.1.0
     hooks:
       - id: context-headers
         args: ["--fix"]
 
-  # 3. FORMATTERS (Run before linters to fix issues automatically)
+  # 3. FORMATTERS
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.14
     hooks:
-      - id: ruff-format # Pure formatting
+      - id: ruff-format
 
   - repo: https://github.com/rbubley/mirrors-prettier
     rev: "v3.8.1"
@@ -49,11 +49,11 @@ repos:
       - id: shfmt
         args: ["-w", "-i", "4", "-ci"]
 
-  # 4. LINTERS (Check code quality)
+  # 4. LINTERS
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.14
     hooks:
-      - id: ruff-check # Linting logic
+      - id: ruff-check
         args: ["--fix"]
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
@@ -66,8 +66,6 @@ repos:
     rev: v2.4.1
     hooks:
       - id: codespell
-        exclude: ^(poetry\.lock|package-lock\.json)$
-        args: ["--ignore-words-list", "afterAll, COo"]
 
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.38.0
@@ -92,14 +90,12 @@ repos:
       - id: docker-compose-check
         files: ^docker-compose\.yml$
 
-  # 5. TYPE CHECKERS (Slowest, run last)
+  # 5. TYPE CHECKERS
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: "v1.19.1"
     hooks:
       - id: mypy
         files: '\.py$'
-        # Ensure mypy knows about your types
-        additional_dependencies: [types-requests]
 
   - repo: https://github.com/RobertCraigie/pyright-python
     rev: v1.1.408
