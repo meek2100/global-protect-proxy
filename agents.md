@@ -1,4 +1,5 @@
 <!-- File: agents.md -->
+
 # Agent Context: GlobalProtect Proxy
 
 ## Project Overview
