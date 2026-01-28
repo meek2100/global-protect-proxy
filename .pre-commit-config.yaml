@@ -13,7 +13,7 @@ repos:
         args: ["--maxkb=500"]
 
   - repo: https://github.com/rbubley/mirrors-prettier
-    rev: "v3.4.2"
+    rev: "v3.8.1"
     hooks:
       - id: prettier
         types_or: [css, javascript, html, json, yaml]
@@ -26,7 +26,7 @@ repos:
         args: ["--fix"]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.11
+    rev: v0.14.14
     hooks:
       - id: ruff-format
       - id: ruff-check
@@ -45,7 +45,7 @@ repos:
         args: ["--ignore", "DL3008"]
 
   - repo: https://github.com/adrienverge/yamllint
-    rev: v1.35.1
+    rev: v1.38.0
     hooks:
       - id: yamllint
         args: ["--config-file", ".yamllint.yaml"]
