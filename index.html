@@ -23,6 +23,31 @@
             border-radius: 12px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
             text-align: center;
+            position: relative;
+            /* Required for absolute positioning of the icon */
+        }
+
+        /* --- NEW: Universal Restart Icon --- */
+        .restart-icon {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: none;
+            border: none;
+            font-size: 24px;
+            color: #ccc;
+            cursor: pointer;
+            transition: color 0.2s, transform 0.2s;
+            padding: 5px;
+            line-height: 1;
+            border-radius: 50%;
+        }
+
+        .restart-icon:hover {
+            color: #dc3545;
+            /* Red on hover to indicate destructive action */
+            background-color: #f8d7da;
+            transform: rotate(90deg);
         }
 
         h1 {
@@ -103,15 +128,6 @@
 
         .btn-success:hover {
             background-color: #218838;
-        }
-
-        .btn-warning {
-            background-color: #ffc107;
-            color: #212529;
-        }
-
-        .btn-warning:hover {
-            background-color: #e0a800;
         }
 
         .btn-danger {
@@ -197,6 +213,9 @@
 
 <body>
     <div class="card">
+        <button class="restart-icon" onclick="confirmRestart()" title="Force Restart / Reset Connection">
+            &#x21bb; </button>
+
         <h1>GlobalProtect VPN</h1>
         <div id="status-badge" class="status-badge status-idle">Loading...</div>
 
@@ -207,8 +226,8 @@
 
         <div id="view-connecting" class="hidden">
             <div class="spinner"></div>
-            <p>Initializing connection...</p>
-            <small>Scanning logs for authentication URL...</small>
+            <p id="connecting-text">Initializing connection...</p>
+            <small id="connecting-subtext">Scanning logs for authentication URL...</small>
         </div>
 
         <div id="view-auth" class="hidden">
@@ -223,11 +242,9 @@
             <a id="sso-link" href="#" target="_blank" class="btn btn-success" onclick="handleLinkClick(this)">Open Login
                 Page</a>
 
-            <button id="restart-btn" onclick="triggerConnect()" class="btn btn-warning hidden">⚠️ Link Expired? Start
-                Over</button>
-
             <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
-            <form action="/submit" method="POST" id="auth-form">
+
+            <form id="auth-form" onsubmit="handleFormSubmit(event)">
                 <input type="text" id="cb_url" name="callback_url"
                     placeholder="Paste globalprotectcallback:// link here..." required autocomplete="off">
                 <button type="submit" class="btn btn-primary">Submit Code</button>
@@ -237,7 +254,8 @@
         <div id="view-input" class="hidden">
             <h3 id="input-title">Additional Input Required</h3>
             <div class="instruction-box" id="input-prompt">Please follow instructions.</div>
-            <form action="/submit" method="POST">
+
+            <form id="input-form" onsubmit="handleFormSubmit(event)">
                 <label for="user_input"
                     style="display:block; text-align:left; margin-bottom:5px; font-weight:bold;">Response:</label>
                 <div id="dynamic-input-container"></div>
@@ -271,9 +289,63 @@
     <script>
         window.currentVpnState = null;
 
+        // --- NEW: Handle Restart Icon Click ---
+        function confirmRestart() {
+            if (confirm("Force Restart: This will kill the current VPN process and start over. Continue?")) {
+                triggerConnect();
+            }
+        }
+
+        async function handleFormSubmit(event) {
+            event.preventDefault();
+
+            const form = event.target;
+            const btn = form.querySelector('button[type="submit"]');
+            const originalText = btn.innerText;
+
+            btn.innerText = "Sending...";
+            btn.disabled = true;
+
+            const formData = new FormData(form);
+            const params = new URLSearchParams();
+            for (const pair of formData) {
+                params.append(pair[0], pair[1]);
+            }
+
+            try {
+                const resp = await fetch('/submit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+
+                if (!resp.ok) throw new Error("Server rejected input");
+
+                document.getElementById('view-auth').classList.add('hidden');
+                document.getElementById('view-input').classList.add('hidden');
+
+                const connectingView = document.getElementById('view-connecting');
+                connectingView.classList.remove('hidden');
+                document.getElementById('connecting-text').innerText = "Verifying Response...";
+                document.getElementById('connecting-subtext').innerText = "Please wait while the server processes your input.";
+                document.getElementById('status-badge').innerText = "VERIFYING...";
+                document.getElementById('status-badge').className = "status-badge status-connecting";
+
+                form.reset();
+
+            } catch (e) {
+                alert("Error submitting data: " + e.message);
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+
         async function triggerConnect() {
             document.getElementById('status-badge').innerText = "STARTING...";
             document.getElementById('view-error').classList.add('hidden');
+
+            document.getElementById('connecting-text').innerText = "Initializing connection...";
+            document.getElementById('connecting-subtext').innerText = "Scanning logs for authentication URL...";
 
             const link = document.getElementById('sso-link');
             if (link) {
@@ -282,7 +354,6 @@
                 link.style.pointerEvents = '';
                 link.style.opacity = '';
             }
-            document.getElementById('restart-btn').classList.add('hidden');
 
             await fetch('/connect', { method: 'POST' });
         }
@@ -297,7 +368,6 @@
         function handleLinkClick(el) {
             el.classList.add('btn-disabled');
             el.innerText = "Link Opened (Single Use)";
-            document.getElementById('restart-btn').classList.remove('hidden');
         }
 
         function toggleDebug() {
