@@ -1,3 +1,4 @@
+# File: server.py
 import http.server
 import socketserver
 import os
@@ -15,18 +16,18 @@ from collections import deque
 PORT = 8001
 FIFO_STDIN = "/tmp/gp-stdin"
 FIFO_CONTROL = "/tmp/gp-control"
-LOG_FILE = "/tmp/gp-logs/vpn.log"
+CLIENT_LOG = "/tmp/gp-logs/gp-client.log"
 MODE_FILE = "/tmp/gp-mode"
-DEBUG_LOG = "/tmp/gp-logs/debug_parser.log"
+SERVICE_LOG = "/tmp/gp-logs/gp-service.log"
 
 # --- Logging Setup ---
-# We stream to stderr so it shows up in Docker logs
+# Unified Logging Format: Matches Rust and Entrypoint (ISO 8601 + Z)
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "DEBUG").upper(),
-    format="[%(asctime)s] [SERVER] %(levelname)s: %(message)s",
-    datefmt="%H:%M:%S",
+    format="[%(asctime)s] [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%SZ",
     handlers=[
-        logging.FileHandler(DEBUG_LOG),
+        logging.FileHandler(SERVICE_LOG),
         logging.StreamHandler(sys.stderr),
     ],
 )
@@ -52,6 +53,9 @@ def get_vpn_state():
     current_state = "idle"
     is_debug = os.getenv("LOG_LEVEL", "INFO").upper() in ["DEBUG", "TRACE"]
 
+    # Capture the operational mode passed from entrypoint
+    vpn_mode = os.getenv("VPN_MODE", "standard")
+
     # 1. Check Mode File
     if os.path.exists(MODE_FILE):
         try:
@@ -60,7 +64,12 @@ def get_vpn_state():
                 if content == "active":
                     current_state = "connecting"
                 elif content == "idle":
-                    return {"state": "idle", "log": "Ready.", "debug_mode": is_debug}
+                    return {
+                        "state": "idle",
+                        "log": "Ready.",
+                        "debug_mode": is_debug,
+                        "vpn_mode": vpn_mode,
+                    }
         except Exception:
             pass
 
@@ -72,12 +81,13 @@ def get_vpn_state():
     error_msg = ""
 
     # 2. Parse Logs
-    if os.path.exists(LOG_FILE):
+    if os.path.exists(CLIENT_LOG):
         try:
-            with open(LOG_FILE, "r", errors="replace") as f:
+            with open(CLIENT_LOG, "r", errors="replace") as f:
                 lines = list(deque(f, maxlen=300))
                 log_content = "".join(lines)
-                clean_lines = [strip_ansi(l).strip() for l in lines[-100:]]
+                # FIX: Renamed 'l' to 'line' to satisfy Ruff E741
+                clean_lines = [strip_ansi(line).strip() for line in lines[-100:]]
 
                 for line in reversed(clean_lines):
                     if "Connected" in line and "to" in line:
@@ -104,8 +114,9 @@ def get_vpn_state():
                                 r"(?:>|\s)*([A-Za-z0-9\-\.]+\s+\([A-Za-z0-9\-\.]+\))"
                             )
                             seen = set()
-                            for l in clean_lines:
-                                m = gateway_regex.search(l)
+                            # FIX: Renamed 'l' to 'line' to satisfy Ruff E741
+                            for line in clean_lines:
+                                m = gateway_regex.search(line)
                                 if m:
                                     opt = m.group(1).strip()
                                     if opt not in seen and "Which gateway" not in opt:
@@ -157,10 +168,17 @@ def get_vpn_state():
         "error": error_msg,
         "log": log_content,
         "debug_mode": is_debug,
+        "vpn_mode": vpn_mode,
     }
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    # FIX: Override log_message to enforce consistent logging style
+    def log_message(self, format, *args):
+        # Redirects default HTTP logs (e.g. "GET /status.json 200") to our unified logger.
+        # This ensures they get the [YYYY-MM-DDTHH:MM:SSZ] prefix.
+        logger.info("%s - - %s", self.client_address[0], format % args)
+
     def do_GET(self):
         if self.path.startswith("/status.json"):
             self.send_response(200)
@@ -184,14 +202,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 )
                 self.end_headers()
 
-                self.wfile.write(b"=== SYSTEM DEBUG LOG ===\n\n")
-                if os.path.exists(DEBUG_LOG):
-                    with open(DEBUG_LOG, "rb") as f:
+                self.wfile.write(b"=== SERVICE LOG (Wrapper/UI) ===\n\n")
+                if os.path.exists(SERVICE_LOG):
+                    with open(SERVICE_LOG, "rb") as f:
                         shutil.copyfileobj(f, self.wfile)
 
-                self.wfile.write(b"\n\n=== VPN CLIENT LOG ===\n\n")
-                if os.path.exists(LOG_FILE):
-                    with open(LOG_FILE, "rb") as f:
+                self.wfile.write(b"\n\n=== CLIENT LOG (GlobalProtect) ===\n\n")
+                if os.path.exists(CLIENT_LOG):
+                    with open(CLIENT_LOG, "rb") as f:
                         shutil.copyfileobj(f, self.wfile)
             except Exception:
                 pass

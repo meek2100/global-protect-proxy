@@ -1,3 +1,4 @@
+# File: .github/workflows/build.yml
 name: Build and Publish Docker Image
 
 on:
@@ -17,7 +18,6 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # --- NEW: Pre-commit Linting Job ---
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -29,10 +29,20 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run Pre-commit Hooks
-        uses: pre-commit/action@v3.0.1
+      - name: Cache pre-commit environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-${{ runner.os }}-
 
-  # --- Modified: Build Job depends on Lint ---
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      - name: Run pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure
+
   build-and-push:
     needs: lint
     runs-on: ubuntu-latest

@@ -1,12 +1,13 @@
 #!/bin/bash
+# File: entrypoint.sh
 set -e
 
 # --- FIX: Ensure administrative commands (ip, iptables) are in PATH ---
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 # --- CONFIGURATION ---
-LOG_FILE="/tmp/gp-logs/vpn.log"
-DEBUG_LOG="/tmp/gp-logs/debug_parser.log"
+CLIENT_LOG="/tmp/gp-logs/gp-client.log"
+SERVICE_LOG="/tmp/gp-logs/gp-service.log"
 MODE_FILE="/tmp/gp-mode"
 PIPE_STDIN="/tmp/gp-stdin"
 PIPE_CONTROL="/tmp/gp-control"
@@ -18,13 +19,13 @@ PIPE_CONTROL="/tmp/gp-control"
 : "${DNS_SERVERS:=}"
 : "${GP_ARGS:=}"
 
+# Disable ANSI colors in Rust binaries (Fixes log artifacting)
+export RUST_LOG_STYLE=never
+
 # Apply Timezone
-ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" >/etc/timezone
 
 # --- LOGGING HELPER ---
-declare -A LOG_PRIORITY
-LOG_PRIORITY=( ["TRACE"]=10 ["DEBUG"]=20 ["INFO"]=30 ["WARN"]=40 ["ERROR"]=50 )
-
 log() {
     local level="$1"
     local msg="$2"
@@ -32,13 +33,14 @@ log() {
     case "$LOG_LEVEL" in
         TRACE) should_log=true ;;
         DEBUG) [[ "$level" != "TRACE" ]] && should_log=true ;;
-        INFO)  [[ "$level" == "INFO" || "$level" == "WARN" || "$level" == "ERROR" ]] && should_log=true ;;
-        *)     [[ "$level" == "INFO" || "$level" == "WARN" || "$level" == "ERROR" ]] && should_log=true ;;
+        INFO) [[ "$level" == "INFO" || "$level" == "WARN" || "$level" == "ERROR" ]] && should_log=true ;;
+        *) [[ "$level" == "INFO" || "$level" == "WARN" || "$level" == "ERROR" ]] && should_log=true ;;
     esac
 
     if [ "$should_log" = true ]; then
-        local timestamp=$(date +'%Y-%m-%dT%H:%M:%S')
-        echo "[$timestamp] [$level] $msg" >> "$DEBUG_LOG"
+        local timestamp
+        timestamp=$(date +'%Y-%m-%dT%H:%M:%SZ')
+        echo "[$timestamp] [$level] $msg" >>"$SERVICE_LOG"
         echo "[$timestamp] [$level] $msg" >&2
     fi
 }
@@ -47,26 +49,33 @@ log() {
 cleanup() {
     log "WARN" "Received Shutdown Signal"
     sudo pkill gpclient || true
-    kill $(jobs -p) 2>/dev/null || true
+    kill "$(jobs -p)" 2>/dev/null || true
     exit 0
 }
 trap cleanup SIGTERM SIGINT
 
 # --- WATCHDOG ---
 check_services() {
-    if ! pgrep -f server.py > /dev/null; then
+    # 1. Web UI Check
+    if ! pgrep -f server.py >/dev/null; then
         log "ERROR" "CRITICAL: Web UI (server.py) died."
-        log "ERROR" "--- DUMPING LOGS ---"
-        cat "$DEBUG_LOG" >&2
-        log "ERROR" "--------------------"
+        exit 1
     fi
 
-    if ! pgrep -u gpuser gpservice > /dev/null; then
+    # 2. GlobalProtect Service Check
+    # FIXED: Use -f to match the full command line.
+    if ! pgrep -f "gpservice" >/dev/null; then
         log "ERROR" "CRITICAL: gpservice died."
+
+        # DEBUG: Dump process list to see what IS running
+        log "ERROR" "--- PROCESS LIST (DEBUG) ---"
+        ps aux >&2
+
         log "ERROR" "--- DUMPING LOGS (Last 50 lines) ---"
-        tail -n 50 "$DEBUG_LOG" >&2
-        log "ERROR" "--------------------"
-        exit 1
+        # FIX: Write to stderr (>&2) instead of appending to the file we are reading (SC2094)
+        tail -n 50 "$SERVICE_LOG" >&2
+
+        # exit 1  <-- DISABLED FOR DEBUGGING as requested
     fi
 }
 
@@ -84,7 +93,7 @@ dns_watchdog() {
                         break
                     fi
                 fi
-            done < /etc/resolv.conf
+            done </etc/resolv.conf
         fi
 
         if [ -n "$current_dns" ] && [ "$current_dns" != "$last_dns" ]; then
@@ -138,9 +147,9 @@ fi
 
 if [ -n "$DNS_TO_APPLY" ]; then
     log "INFO" "Overwriting /etc/resolv.conf"
-    echo "options ndots:0" > /etc/resolv.conf
+    echo "options ndots:0" >/etc/resolv.conf
     for ip in $DNS_TO_APPLY; do
-        echo "nameserver $ip" >> /etc/resolv.conf
+        echo "nameserver $ip" >>/etc/resolv.conf
     done
 fi
 
@@ -151,7 +160,7 @@ iptables -A INPUT -p tcp --dport 8001 -j ACCEPT
 
 if [ "$VPN_MODE" = "gateway" ] || [ "$VPN_MODE" = "standard" ]; then
     if [ "$(cat /proc/sys/net/ipv4/ip_forward)" != "1" ]; then
-        echo 1 > /proc/sys/net/ipv4/ip_forward
+        echo 1 >/proc/sys/net/ipv4/ip_forward
     fi
     iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
     iptables -A FORWARD -i eth0 -o tun0 -j ACCEPT
@@ -167,56 +176,63 @@ fi
 rm -f "$PIPE_STDIN" "$PIPE_CONTROL" "$MODE_FILE"
 mkfifo "$PIPE_STDIN" "$PIPE_CONTROL"
 mkdir -p /tmp/gp-logs
-touch "$LOG_FILE" "$DEBUG_LOG"
+touch "$CLIENT_LOG" "$SERVICE_LOG"
 chown -R gpuser:gpuser /tmp/gp-logs /var/www/html "$PIPE_STDIN" "$PIPE_CONTROL"
-echo "idle" > "$MODE_FILE"
+echo "idle" >"$MODE_FILE"
 chmod 644 "$MODE_FILE"
 
 # --- 6. START SERVICES ---
 log "INFO" "Starting Services..."
 dns_watchdog &
 
-# Use "su - gpuser" (Working State)
-# Background services need time to spawn before watchdog checks them
-su - gpuser -c "/usr/bin/gpservice >> \"$DEBUG_LOG\" 2>&1 &"
+# FIX: Start gpservice via bash pipe to filter out benign error noise.
+# We use grep --line-buffered to ensure real logs appear instantly.
+# This filters:
+# 1. "Failed to start WS server" (Expected in headless mode)
+# 2. "Error: No such file or directory (os error 2)" (Cleanup artifact)
+runuser -u gpuser -- bash -c "
+    /usr/bin/gpservice 2>&1 | \
+    grep --line-buffered -v -E 'Failed to start WS server|Error: No such file or directory \(os error 2\)' \
+    >> \"$SERVICE_LOG\"
+" &
 
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
-    su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
+    runuser -u gpuser -- microsocks -i 0.0.0.0 -p 1080 >/dev/null 2>&1 &
 fi
 
-# Use -u for unbuffered logs (Production Feature)
-su - gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 -u /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
+# Pass configuration to Server
+runuser -u gpuser -- env VPN_MODE="$VPN_MODE" LOG_LEVEL="$LOG_LEVEL" \
+    python3 -u /var/www/html/server.py >>"$SERVICE_LOG" 2>&1 &
 
-# Log Streaming (Production Feature)
-if [[ "$LOG_LEVEL" == "DEBUG" || "$LOG_LEVEL" == "TRACE" ]]; then
-    log "INFO" "Debug mode enabled. Streaming internal logs to stdout..."
-    tail -f "$LOG_FILE" "$DEBUG_LOG" &
-fi
+# FIX: Stream logs to Docker stdout in background
+# 'tail -F' follows retries if file is recreated
+tail -F "$SERVICE_LOG" "$CLIENT_LOG" &
 
-# CRITICAL FIX: Grace period for services to start before Watchdog kills them
+# Grace period for services to settle before we start checking them
 sleep 3
 
 # --- 7. MAIN LOOP ---
 while true; do
     check_services
 
-    if read -t 2 _ < "$PIPE_CONTROL"; then
+    if read -r -t 2 _ <"$PIPE_CONTROL"; then
         log "INFO" "Signal received. Starting gpclient..."
-        echo "active" > "$MODE_FILE"
+        echo "active" >"$MODE_FILE"
 
-        su - gpuser -c "
+        runuser -u gpuser -- bash -c "
             export VPN_PORTAL=\"$VPN_PORTAL\"
             export GP_ARGS=\"$GP_ARGS\"
-            > \"$LOG_FILE\"
+            > \"$CLIENT_LOG\"
             exec 3<> \"$PIPE_STDIN\"
 
+            # Using sudo for gpclient to allow full network access
             CMD=\"sudo gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
 
-            echo \"[Entrypoint] Executing: \$CMD\" >> \"$DEBUG_LOG\"
-            script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1
+            echo \"[Entrypoint] Executing: \$CMD\" >> \"$SERVICE_LOG\"
+            script -q -c \"\$CMD\" /dev/null <&3 >> \"$CLIENT_LOG\" 2>&1
         "
 
         log "WARN" "gpclient exited."
-        echo "idle" > "$MODE_FILE"
+        echo "idle" >"$MODE_FILE"
     fi
 done

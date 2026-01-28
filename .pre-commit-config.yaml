@@ -8,15 +8,25 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+      # Exclude VS Code/Devcontainer files (JSONC)
       - id: check-json
+        exclude: ^(\.vscode/|\.devcontainer/)
       - id: check-added-large-files
         args: ["--maxkb=500"]
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: [--branch, main]
+      - id: check-merge-conflict
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
 
   - repo: https://github.com/rbubley/mirrors-prettier
     rev: "v3.8.1"
     hooks:
       - id: prettier
-        types_or: [css, javascript, html, json, yaml]
+        types_or: [css, javascript, html, json, yaml, markdown]
         args: ["--config", ".prettierrc.yaml"]
 
   - repo: https://github.com/meek2100/pre-commit-context-header
@@ -37,6 +47,17 @@ repos:
     hooks:
       - id: shellcheck
         args: ["--format=gcc"]
+
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.12.0-2
+    hooks:
+      - id: shfmt
+        args: ["-w", "-i", "4", "-ci"]
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
 
   - repo: https://github.com/AleksaC/hadolint-py
     rev: v2.14.0

@@ -2,14 +2,12 @@
 version: 2
 updates:
   # Maintain GitHub Actions dependencies
-  # Monitors build.yml and pre-commit-sync.yml for action updates
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
 
   # Maintain Docker dependencies
-  # Monitors Dockerfile and Dockerfile_Big for base image updates (rust, debian)
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
