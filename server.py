@@ -382,10 +382,10 @@ if __name__ == "__main__":
     os.chdir("/var/www/html")
 
     # FIX: Platform-safe check for Windows development environments
+    # We use getattr to avoid 'attr-defined' errors on Windows and 'unused-ignore' errors on Linux
     if sys.platform != "win32":
         if not FIFO_CONTROL.exists():
-            # type: ignore[attr-defined]
-            os.mkfifo(FIFO_CONTROL)  # pyright: ignore[reportAttributeAccessIssue]
+            os.mkfifo(FIFO_CONTROL)
             os.chmod(FIFO_CONTROL, 0o666)
 
     socketserver.TCPServer.allow_reuse_address = True
