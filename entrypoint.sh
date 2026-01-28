@@ -72,7 +72,7 @@ check_services() {
         ps aux >&2
 
         log "ERROR" "--- DUMPING LOGS (Last 50 lines) ---"
-        # FIX: Write to stderr instead of appending to self (SC2094)
+        # FIX: Write to stderr (>&2) instead of appending to the file we are reading (SC2094)
         tail -n 50 "$DEBUG_LOG" >&2
 
         # exit 1  <-- DISABLED FOR DEBUGGING as requested

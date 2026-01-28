@@ -86,10 +86,8 @@ def get_vpn_state():
             with open(LOG_FILE, "r", errors="replace") as f:
                 lines = list(deque(f, maxlen=300))
                 log_content = "".join(lines)
-                # FIX: Renamed 'l' to 'raw_line' to fix E741
-                clean_lines = [
-                    strip_ansi(raw_line).strip() for raw_line in lines[-100:]
-                ]
+                # FIX: Renamed 'l' to 'line' to satisfy Ruff E741
+                clean_lines = [strip_ansi(line).strip() for line in lines[-100:]]
 
                 for line in reversed(clean_lines):
                     if "Connected" in line and "to" in line:
@@ -116,9 +114,9 @@ def get_vpn_state():
                                 r"(?:>|\s)*([A-Za-z0-9\-\.]+\s+\([A-Za-z0-9\-\.]+\))"
                             )
                             seen = set()
-                            # FIX: Renamed 'l' to 'line_content' to fix E741
-                            for line_content in clean_lines:
-                                m = gateway_regex.search(line_content)
+                            # FIX: Renamed 'l' to 'line' to satisfy Ruff E741
+                            for line in clean_lines:
+                                m = gateway_regex.search(line)
                                 if m:
                                     opt = m.group(1).strip()
                                     if opt not in seen and "Which gateway" not in opt:
