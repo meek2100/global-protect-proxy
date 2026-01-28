@@ -10,28 +10,31 @@ on:
       - "entrypoint.sh"
       - "server.py"
       - ".pre-commit-config.yaml"
+      - ".github/workflows/*"
+  workflow_dispatch:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Dependabot's Branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: "3.14" # Updated to match your latest baseline
+          python-version: "3.14"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20 # Required for Prettier initialization
+          node-version: 20
 
       - name: Install pre-commit
         run: pip install pre-commit
@@ -39,10 +42,17 @@ jobs:
       - name: Run pre-commit autoupdate
         run: pre-commit autoupdate
 
-      - name: Commit and Push changes
-        uses: stefanzweifel/git-auto-commit-action@v5
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v8
         with:
-          commit_message: "chore(deps): Synchronize pre-commit hooks"
-          files: ".pre-commit-config.yaml"
-          branch: ${{ github.event.pull_request.head.ref }}
-          commit_author: Dependabot <dependabot@users.noreply.github.com>
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(deps): update pre-commit hooks"
+          branch: "pre-commit-sync-${{ github.event.pull_request.head.ref }}"
+          title: "chore(deps): synchronize pre-commit hooks for ${{ github.event.pull_request.head.ref }}"
+          body: |
+            This PR synchronizes the `.pre-commit-config.yaml` hooks following a Dependabot update.
+
+            Triggered by PR: #${{ github.event.pull_request.number }}
+          labels: |
+            dependencies
+            automerge
