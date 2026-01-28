@@ -50,9 +50,10 @@ FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 # MINIMAL RUNTIME DEPENDENCIES
-# Restored to working state: No dbus, No stdbuf
+# - tzdata: For Timezone support
+# - procps: For pkill/pgrep (Required for Watchdog/Shutdown)
 RUN apt-get update && apt-get install -y \
-    microsocks python3 iptables iproute2 util-linux procps \
+    microsocks python3 iptables iproute2 util-linux procps tzdata \
     vpnc-scripts ca-certificates \
     libxml2 libgnutls30t64 liblz4-1 libpsl5 libsecret-1-0 openssl \
     sudo \
@@ -61,7 +62,7 @@ RUN apt-get update && apt-get install -y \
 
 RUN useradd -m -s /bin/bash gpuser
 
-# Configure passwordless sudo for gpuser (Restored to working state)
+# Configure passwordless sudo for gpuser (Restored to Working State)
 RUN echo "gpuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gpuser && \
     chmod 0440 /etc/sudoers.d/gpuser
 
@@ -72,9 +73,11 @@ COPY --from=builder \
     /usr/src/app/target/release/gpauth \
     /usr/bin/
 
-# Set capabilities for gpservice
+# Set capabilities and refresh library cache
+# 'ldconfig' is crucial here so gpservice finds libs without LD_LIBRARY_PATH
 RUN apt-get update && apt-get install -y libcap2-bin && \
     setcap 'cap_net_admin,cap_net_bind_service+ep' /usr/bin/gpservice && \
+    ldconfig && \
     rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \

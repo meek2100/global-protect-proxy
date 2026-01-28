@@ -12,10 +12,14 @@ PIPE_STDIN="/tmp/gp-stdin"
 PIPE_CONTROL="/tmp/gp-control"
 
 # Defaults
+: "${TZ:=UTC}"
 : "${LOG_LEVEL:=INFO}"
 : "${VPN_MODE:=standard}"
 : "${DNS_SERVERS:=}"
 : "${GP_ARGS:=}"
+
+# Apply Timezone
+ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # --- LOGGING HELPER ---
 declare -A LOG_PRIORITY
@@ -33,23 +37,33 @@ log() {
     esac
 
     if [ "$should_log" = true ]; then
-        local timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+        local timestamp=$(date +'%Y-%m-%dT%H:%M:%S')
         echo "[$timestamp] [$level] $msg" >> "$DEBUG_LOG"
         echo "[$timestamp] [$level] $msg" >&2
     fi
 }
 
+# --- GRACEFUL SHUTDOWN ---
+cleanup() {
+    log "WARN" "Received Shutdown Signal"
+    sudo pkill gpclient || true
+    kill $(jobs -p) 2>/dev/null || true
+    exit 0
+}
+trap cleanup SIGTERM SIGINT
+
 # --- WATCHDOG ---
-# Kept the log dumping logic because it is useful for debugging without changing behavior
 check_services() {
     if ! pgrep -f server.py > /dev/null; then
         log "ERROR" "CRITICAL: Web UI (server.py) died."
-        exit 1
+        log "ERROR" "--- DUMPING LOGS ---"
+        cat "$DEBUG_LOG" >&2
+        log "ERROR" "--------------------"
     fi
 
     if ! pgrep -u gpuser gpservice > /dev/null; then
         log "ERROR" "CRITICAL: gpservice died."
-        log "ERROR" "--- DUMPING LOGS ---"
+        log "ERROR" "--- DUMPING LOGS (Last 50 lines) ---"
         tail -n 50 "$DEBUG_LOG" >&2
         log "ERROR" "--------------------"
         exit 1
@@ -162,14 +176,25 @@ chmod 644 "$MODE_FILE"
 log "INFO" "Starting Services..."
 dns_watchdog &
 
-# Start gpservice (Restored: No stdbuf, No dbus)
+# Use "su - gpuser" (Working State)
+# Background services need time to spawn before watchdog checks them
 su - gpuser -c "/usr/bin/gpservice >> \"$DEBUG_LOG\" 2>&1 &"
 
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
     su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
 fi
 
-su - gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
+# Use -u for unbuffered logs (Production Feature)
+su - gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 -u /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
+
+# Log Streaming (Production Feature)
+if [[ "$LOG_LEVEL" == "DEBUG" || "$LOG_LEVEL" == "TRACE" ]]; then
+    log "INFO" "Debug mode enabled. Streaming internal logs to stdout..."
+    tail -f "$LOG_FILE" "$DEBUG_LOG" &
+fi
+
+# CRITICAL FIX: Grace period for services to start before Watchdog kills them
+sleep 3
 
 # --- 7. MAIN LOOP ---
 while true; do
