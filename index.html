@@ -110,9 +110,17 @@
             color: #212529;
         }
 
-        /* New Warning Style */
         .btn-warning:hover {
             background-color: #e0a800;
+        }
+
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background-color: #c82333;
         }
 
         /* Disabled State for the Link */
@@ -248,6 +256,8 @@
             <div style="font-size: 50px; margin-bottom: 10px;">✅</div>
             <p><strong>Secure Connection Active</strong></p>
             <p>SOCKS5 Proxy: <code>Port 1080</code></p>
+            <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
+            <button onclick="triggerDisconnect()" class="btn btn-danger">Disconnect / Logout</button>
         </div>
 
         <div style="margin-top:20px; display: flex; justify-content: space-between; align-items: center;">
@@ -265,12 +275,10 @@
             document.getElementById('status-badge').innerText = "STARTING...";
             document.getElementById('view-error').classList.add('hidden');
 
-            // RESET AUTH UI: Re-enable the link for the next attempt
             const link = document.getElementById('sso-link');
             if (link) {
                 link.classList.remove('btn-disabled');
                 link.innerText = "Open Login Page";
-                // We don't remove pointer-events via class strictly, we rely on the class removal
                 link.style.pointerEvents = '';
                 link.style.opacity = '';
             }
@@ -279,12 +287,16 @@
             await fetch('/connect', { method: 'POST' });
         }
 
+        async function triggerDisconnect() {
+            if (confirm("Are you sure you want to disconnect?")) {
+                document.getElementById('status-badge').innerText = "DISCONNECTING...";
+                await fetch('/disconnect', { method: 'POST' });
+            }
+        }
+
         function handleLinkClick(el) {
-            // 1. Disable the button immediately
             el.classList.add('btn-disabled');
             el.innerText = "Link Opened (Single Use)";
-
-            // 2. Reveal the Restart button
             document.getElementById('restart-btn').classList.remove('hidden');
         }
 
@@ -315,7 +327,6 @@
 
                 if (data.state === 'auth' && data.url) {
                     const link = document.getElementById('sso-link');
-                    // Only update href if not disabled to prevent weird loops
                     if (!link.classList.contains('btn-disabled') && link.getAttribute('href') !== data.url) {
                         link.href = data.url;
                     }

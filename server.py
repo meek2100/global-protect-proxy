@@ -8,6 +8,7 @@ import json
 import logging
 import shutil
 import subprocess
+import time
 
 # --- Configuration ---
 PORT = 8001
@@ -37,7 +38,6 @@ def strip_ansi(text):
     Aggressively removes ANSI escape sequences to reveal pure text.
     Handles colors, cursor movements, and line clearing.
     """
-    # 7-bit C1 ANSI sequences
     ansi_escape = re.compile(
         r"""
         \x1B  # ESC
@@ -58,23 +58,24 @@ def strip_ansi(text):
 def get_vpn_state():
     """
     Parses the VPN log to determine the current state of the connection process.
-    Moves from the specific (log lines) to the whole (User UI State).
     """
     global last_known_state
 
     current_state = "idle"
 
     # 1. Check Mode File
+    # If entrypoint.sh says "active", we are at least connecting.
+    # If entrypoint.sh writes "idle", we trust that immediately.
     if os.path.exists(MODE_FILE):
         try:
             with open(MODE_FILE, "r") as f:
-                if f.read().strip() == "active":
+                content = f.read().strip()
+                if content == "active":
                     current_state = "connecting"
+                elif content == "idle":
+                    return {"state": "idle", "log": "Ready to connect."}
         except Exception as e:
             logger.error(f"Failed to read mode file: {e}")
-
-    if current_state == "idle":
-        return {"state": "idle", "log": "Ready to connect."}
 
     log_content = ""
     sso_url = ""
@@ -116,7 +117,6 @@ def get_vpn_state():
                             prompt_msg = "Select Gateway:"
                             prompt_type = "select"
 
-                            # Cleanly extract options
                             gateway_regex = re.compile(
                                 r"(?:>|\s)*([A-Za-z0-9\-\.]+\s+\([A-Za-z0-9\-\.]+\))"
                             )
@@ -142,9 +142,7 @@ def get_vpn_state():
                             prompt_type = "text"
                             break
 
-                # D. Auth Check (FIXED: LOGIC SHADOW)
-                # We ONLY check for Auth if we are stuck in 'connecting'.
-                # If we are already in 'input', we have passed the initial auth request.
+                # D. Auth Check
                 if current_state == "connecting":
                     if (
                         "Manual Authentication Required" in log_content
@@ -167,12 +165,6 @@ def get_vpn_state():
 
     if current_state != last_known_state:
         logger.info(f"State Transition: {last_known_state} -> {current_state}")
-        if current_state == "input":
-            logger.info(
-                f"detected Prompt: '{prompt_msg}' | Options found: {len(input_options)}"
-            )
-        if current_state == "error":
-            logger.error(f"detected Error: {error_msg}")
         last_known_state = current_state
 
     return {
@@ -183,7 +175,7 @@ def get_vpn_state():
         "options": sorted(input_options),
         "error": error_msg,
         "log": log_content,
-        "debug": f"State: {current_state} | Options: {len(input_options)}",
+        "debug": f"State: {current_state}",
     }
 
 
@@ -224,23 +216,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return http.server.SimpleHTTPRequestHandler.do_GET(self)
 
     def do_POST(self):
+        # --- CONNECT HANDLER ---
         if self.path == "/connect":
             logger.info("User requested Connection (POST /connect)")
-
-            # --- FIX: DEADLOCK PREVENTION ---
-            # If gpclient is currently running (waiting for input), the entrypoint
-            # script is blocked and NOT reading the pipe. We must kill it first.
             try:
                 logger.info("Ensuring previous gpclient processes are terminated...")
-                subprocess.run(["pkill", "gpclient"], stderr=subprocess.DEVNULL)
-                # Small delay to allow entrypoint.sh to loop back to 'read'
-                import time
-
-                time.sleep(0.5)
+                # Use sudo because gpclient runs as root
+                subprocess.run(["sudo", "pkill", "gpclient"], stderr=subprocess.DEVNULL)
+                time.sleep(0.5)  # Allow entrypoint loop to reset
             except Exception as e:
                 logger.error(f"Failed to kill gpclient: {e}")
 
-            # Now safe to write to the pipe
             try:
                 with open(FIFO_CONTROL, "w") as f:
                     f.write("START\n")
@@ -252,6 +238,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_error(500, "Failed to start VPN process")
             return
 
+        # --- DISCONNECT HANDLER (NEW) ---
+        if self.path == "/disconnect":
+            logger.info("User requested Disconnect (POST /disconnect)")
+            try:
+                # Use sudo to kill the root process.
+                # entrypoint.sh will detect the exit and set state to 'idle'.
+                subprocess.run(["sudo", "pkill", "gpclient"], stderr=subprocess.DEVNULL)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"OK")
+            except Exception as e:
+                logger.error(f"Disconnect failed: {e}")
+                self.send_error(500, "Failed to stop VPN process")
+            return
+
+        # --- SUBMIT HANDLER ---
         if self.path == "/submit":
             try:
                 length = int(self.headers.get("Content-Length", 0))
