@@ -13,7 +13,7 @@ repos:
         args: ["--maxkb=500"]
 
   - repo: https://github.com/rbubley/mirrors-prettier
-    rev: "v3.4.2"
+    rev: "v3.8.1"
     hooks:
       - id: prettier
         types_or: [css, javascript, html, json, yaml]
