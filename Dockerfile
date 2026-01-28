@@ -4,7 +4,6 @@ FROM rust:trixie AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
 # 1. Install Build Dependencies
-# Added 'binutils' to ensure 'strip' command is available
 RUN apt-get update && apt-get install -y \
     build-essential cmake git binutils \
     libssl-dev libxml2-dev \
@@ -31,7 +30,7 @@ RUN grep -rl "cannot be run as root" . | xargs sed -i 's/if.*root.*/if false {/'
 RUN sed -i 's/let no_gui = false;/let no_gui = true;/' apps/gpservice/src/cli.rs
 
 # --- COMPILATION (Optimized) ---
-# FIX: Use 'thin' LTO to avoid OOM crashes on GitHub Runners
+# Use 'thin' LTO to avoid OOM crashes on GitHub Runners
 ENV CARGO_PROFILE_RELEASE_LTO=thin \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
     CARGO_PROFILE_RELEASE_PANIC=abort
@@ -54,14 +53,13 @@ FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 # MINIMAL RUNTIME DEPENDENCIES
+# Explicitly install iproute2 and ensure it stays.
 RUN apt-get update && apt-get install -y \
     microsocks python3 iptables iproute2 util-linux \
     vpnc-scripts ca-certificates \
     libxml2 libgnutls30t64 liblz4-1 libpsl5 libsecret-1-0 openssl \
     sudo \
     --no-install-recommends && \
-    # Cleanup: Try to remove net-tools if it was pulled as a weak dep
-    apt-get purge -y net-tools || true && \
     rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash gpuser
@@ -70,7 +68,7 @@ RUN useradd -m -s /bin/bash gpuser
 RUN echo "gpuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gpuser && \
     chmod 0440 /etc/sudoers.d/gpuser
 
-# OPTIMIZATION: Combine COPY instructions to create a single cached layer
+# Combine COPY instructions
 COPY --from=builder \
     /usr/src/app/target/release/gpclient \
     /usr/src/app/target/release/gpservice \
@@ -78,10 +76,10 @@ COPY --from=builder \
     /usr/bin/
 
 # Set capabilities for gpservice
+# FIX: Do NOT run 'autoremove' here. It deletes iproute2.
+# We simply install setcap, use it, and leave it (it's tiny).
 RUN apt-get update && apt-get install -y libcap2-bin && \
     setcap 'cap_net_admin,cap_net_bind_service+ep' /usr/bin/gpservice && \
-    apt-get remove -y libcap2-bin && \
-    apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \
