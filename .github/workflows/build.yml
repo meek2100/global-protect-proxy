@@ -28,25 +28,18 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-          cache: "pip" # Caches the pip installation of pre-commit itself
 
-      # 1. EXPLICIT CACHING: This is the key to speed.
-      # It caches the heavy environments (venvs) that pre-commit builds.
       - name: Cache pre-commit environments
         uses: actions/cache@v4
         with:
           path: ~/.cache/pre-commit
-          # Key invalidates if config changes, ensuring fresh envs when needed
           key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
           restore-keys: |
             pre-commit-${{ runner.os }}-
 
-      # 2. Manual Install (Faster/Lighter than the wrapper action)
       - name: Install pre-commit
         run: pip install pre-commit
 
-      # 3. Run Pre-commit
-      # --show-diff-on-failure: Critical for debugging in CI
       - name: Run pre-commit
         run: pre-commit run --all-files --show-diff-on-failure
 
