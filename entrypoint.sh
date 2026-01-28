@@ -40,6 +40,40 @@ log() {
 
 log "INFO" "Entrypoint started. Level: $LOG_LEVEL, Mode: $VPN_MODE"
 
+# --- DNS WATCHDOG ---
+# Monitors resolv.conf for changes. If the VPN connection updates the DNS
+# to an internal IP, this automatically forwards all container DNS traffic
+# to that new internal server.
+dns_watchdog() {
+    local last_dns=""
+    log "INFO" "Starting DNS Watchdog..."
+    while true; do
+        # 1. Get the current nameserver from resolv.conf (ignoring localhost)
+        local current_dns=$(grep '^nameserver' /etc/resolv.conf | awk '{print $2}' | grep -v '127.0.0.1' | head -n 1)
+
+        # 2. If it changed, and it's not our fallback defaults
+        if [ -n "$current_dns" ] && [ "$current_dns" != "$last_dns" ]; then
+            if [[ "$current_dns" != "8.8.8.8" && "$current_dns" != "1.1.1.1" ]]; then
+                log "INFO" "VPN DNS Detected: $current_dns. Enabling Transparent Forwarding..."
+
+                # Cleanup old rules if they exist
+                if [ -n "$last_dns" ]; then
+                    iptables -t nat -D PREROUTING -i eth0 -p udp --dport 53 -j DNAT --to-destination "$last_dns" 2>/dev/null || true
+                    iptables -t nat -D PREROUTING -i eth0 -p tcp --dport 53 -j DNAT --to-destination "$last_dns" 2>/dev/null || true
+                fi
+
+                # Add new rules: Forward incoming port 53 requests to the VPN DNS
+                iptables -t nat -A PREROUTING -i eth0 -p udp --dport 53 -j DNAT --to-destination "$current_dns"
+                iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 53 -j DNAT --to-destination "$current_dns"
+
+                last_dns="$current_dns"
+                log "INFO" "DNS Forwarding Active. Clients using this container as Gateway/DNS will now resolve internal domains."
+            fi
+        fi
+        sleep 5
+    done
+}
+
 # --- 1. USER IDENTITY DETECTION ---
 if [ -n "$PUID" ]; then usermod -u "$PUID" gpuser; fi
 if [ -n "$PGID" ]; then groupmod -g "$PGID" gpuser; fi
