@@ -50,8 +50,6 @@ FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 # MINIMAL RUNTIME DEPENDENCIES
-# - tzdata: For correct log timestamps
-# - procps: For pkill (process management)
 RUN apt-get update && apt-get install -y \
     microsocks python3 iptables iproute2 util-linux procps tzdata \
     vpnc-scripts ca-certificates \
@@ -63,8 +61,10 @@ RUN apt-get update && apt-get install -y \
 RUN useradd -m -s /bin/bash gpuser
 
 # SECURITY: Least Privilege Sudo
-# Only allow gpclient and pkill. Deny everything else.
-RUN echo "gpuser ALL=(root) NOPASSWD: /usr/bin/gpclient, /usr/bin/pkill" > /etc/sudoers.d/gpuser && \
+# - gpclient: To run the VPN
+# - pkill: To disconnect/reset
+# - stdbuf: To stream logs in real-time (Fixes start-up failure)
+RUN echo "gpuser ALL=(root) NOPASSWD: /usr/bin/gpclient, /usr/bin/pkill, /usr/bin/stdbuf" > /etc/sudoers.d/gpuser && \
     chmod 0440 /etc/sudoers.d/gpuser
 
 # Combine COPY instructions

@@ -71,7 +71,8 @@ check_services() {
     if [ "$VPN_MODE" != "gateway" ]; then
         if ! pgrep -u gpuser microsocks > /dev/null; then
             log "WARN" "Microsocks crashed. Restarting..."
-            su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
+            # Use -p to preserve env (LD_LIBRARY_PATH)
+            su -p gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
         fi
     fi
 
@@ -186,14 +187,16 @@ chmod 644 "$MODE_FILE"
 # --- 6. START SERVICES ---
 log "INFO" "Starting Services..."
 dns_watchdog &
-su - gpuser -c "/usr/bin/gpservice >> \"$DEBUG_LOG\" 2>&1 &"
+
+# FIX: Use 'su -p' to preserve LD_LIBRARY_PATH for gpservice
+su -p gpuser -c "/usr/bin/gpservice >> \"$DEBUG_LOG\" 2>&1 &"
 
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
-    su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
+    su -p gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
 fi
 
 # OPTIMIZATION: Use -u for unbuffered Python output (Real-time logs)
-su - gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 -u /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
+su -p gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 -u /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
 
 # Log Streaming
 if [[ "$LOG_LEVEL" == "DEBUG" || "$LOG_LEVEL" == "TRACE" ]]; then
@@ -211,12 +214,14 @@ while true; do
         log "INFO" "Signal received. Starting gpclient..."
         echo "active" > "$MODE_FILE"
 
-        su - gpuser -c "
+        # Note: We must still use 'su -p' here, although sudo handles priv escalation.
+        su -p gpuser -c "
             export VPN_PORTAL=\"$VPN_PORTAL\"
             export GP_ARGS=\"$GP_ARGS\"
             > \"$LOG_FILE\"
             exec 3<> \"$PIPE_STDIN\"
 
+            # sudo stdbuf is now allowed by sudoers
             CMD=\"sudo stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
 
             echo \"[Entrypoint] Executing: \$CMD\" >> \"$DEBUG_LOG\"
