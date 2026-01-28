@@ -21,11 +21,11 @@ MODE_FILE = "/tmp/gp-mode"
 DEBUG_LOG = "/tmp/gp-logs/debug_parser.log"
 
 # --- Logging Setup ---
-# We stream to stderr so it shows up in Docker logs
+# Unified Logging Format: Matches Rust and Entrypoint (ISO 8601 + Z)
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "DEBUG").upper(),
-    format="[%(asctime)s] [SERVER] %(levelname)s: %(message)s",
-    datefmt="%H:%M:%S",
+    format="[%(asctime)s] [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%SZ",
     handlers=[
         logging.FileHandler(DEBUG_LOG),
         logging.StreamHandler(sys.stderr),
@@ -173,6 +173,12 @@ def get_vpn_state():
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    # FIX: Override log_message to enforce consistent logging style
+    def log_message(self, format, *args):
+        # Redirects default HTTP logs (e.g. "GET /status.json 200") to our unified logger.
+        # This ensures they get the [YYYY-MM-DDTHH:MM:SSZ] prefix.
+        logger.info("%s - - %s", self.client_address[0], format % args)
+
     def do_GET(self):
         if self.path.startswith("/status.json"):
             self.send_response(200)
