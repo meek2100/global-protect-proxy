@@ -45,7 +45,7 @@ log() {
 # --- GRACEFUL SHUTDOWN ---
 cleanup() {
     log "WARN" "Received Shutdown Signal"
-    sudo pkill gpclient || true
+    sudo /usr/bin/pkill gpclient || true
     kill $(jobs -p) 2>/dev/null || true
     exit 0
 }
@@ -57,13 +57,19 @@ log "INFO" "Entrypoint started. Level: $LOG_LEVEL, Mode: $VPN_MODE"
 check_services() {
     # 1. Critical: Web UI (Python)
     if ! pgrep -f server.py > /dev/null; then
-        log "ERROR" "CRITICAL: Web UI (server.py) died. Exiting to trigger restart."
+        log "ERROR" "CRITICAL: Web UI (server.py) died."
+        log "ERROR" "--- DUMPING LOGS ---"
+        cat "$DEBUG_LOG" >&2
+        log "ERROR" "--------------------"
         exit 1
     fi
 
     # 2. Critical: GlobalProtect Service
     if ! pgrep -u gpuser gpservice > /dev/null; then
-        log "ERROR" "CRITICAL: gpservice died. Exiting to trigger restart."
+        log "ERROR" "CRITICAL: gpservice died."
+        log "ERROR" "--- DUMPING LOGS (Last 50 lines) ---"
+        tail -n 50 "$DEBUG_LOG" >&2
+        log "ERROR" "--------------------"
         exit 1
     fi
 
@@ -71,8 +77,7 @@ check_services() {
     if [ "$VPN_MODE" != "gateway" ]; then
         if ! pgrep -u gpuser microsocks > /dev/null; then
             log "WARN" "Microsocks crashed. Restarting..."
-            # Use -p to preserve env (LD_LIBRARY_PATH)
-            su -p gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
+            runuser -u gpuser -- microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &
         fi
     fi
 
@@ -115,7 +120,7 @@ dns_watchdog() {
     done
 }
 
-# --- 1. USER IDENTITY DETECTION ---
+# --- 1. SETUP ---
 if [ -n "$PUID" ]; then usermod -u "$PUID" gpuser; fi
 if [ -n "$PGID" ]; then groupmod -g "$PGID" gpuser; fi
 
@@ -188,15 +193,20 @@ chmod 644 "$MODE_FILE"
 log "INFO" "Starting Services..."
 dns_watchdog &
 
-# FIX: Use 'su -p' to preserve LD_LIBRARY_PATH for gpservice
-su -p gpuser -c "/usr/bin/gpservice >> \"$DEBUG_LOG\" 2>&1 &"
+# Start DBus (Required for gpservice)
+if [ ! -d /var/run/dbus ]; then mkdir -p /var/run/dbus; fi
+dbus-daemon --system --fork
+log "INFO" "DBus Daemon started."
+
+# FIX: Use 'stdbuf' to ensure logs aren't buffered if it crashes instantly
+runuser -u gpuser -- stdbuf -oL -eL /usr/bin/gpservice >> "$DEBUG_LOG" 2>&1 &
 
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
-    su -p gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
+    runuser -u gpuser -- microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &
 fi
 
 # OPTIMIZATION: Use -u for unbuffered Python output (Real-time logs)
-su -p gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 -u /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
+runuser -u gpuser -- /usr/bin/python3 -u /var/www/html/server.py >> "$DEBUG_LOG" 2>&1 &
 
 # Log Streaming
 if [[ "$LOG_LEVEL" == "DEBUG" || "$LOG_LEVEL" == "TRACE" ]]; then
@@ -204,9 +214,12 @@ if [[ "$LOG_LEVEL" == "DEBUG" || "$LOG_LEVEL" == "TRACE" ]]; then
     tail -f "$LOG_FILE" "$DEBUG_LOG" &
 fi
 
+# STARTUP GRACE PERIOD (Give gpservice 2 seconds to initialize or crash)
+sleep 2
+
 # --- 7. MAIN LOOP ---
 while true; do
-    # Run Watchdog checks
+    # Run Watchdog checks (dumps logs on failure)
     check_services
 
     # Non-blocking check for start signal (timeout 2s)
@@ -214,15 +227,14 @@ while true; do
         log "INFO" "Signal received. Starting gpclient..."
         echo "active" > "$MODE_FILE"
 
-        # Note: We must still use 'su -p' here, although sudo handles priv escalation.
-        su -p gpuser -c "
+        runuser -u gpuser -- bash -c "
             export VPN_PORTAL=\"$VPN_PORTAL\"
             export GP_ARGS=\"$GP_ARGS\"
             > \"$LOG_FILE\"
             exec 3<> \"$PIPE_STDIN\"
 
-            # sudo stdbuf is now allowed by sudoers
-            CMD=\"sudo stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
+            # Use full path to stdbuf and sudo
+            CMD=\"/usr/bin/sudo /usr/bin/stdbuf -oL -eL gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
 
             echo \"[Entrypoint] Executing: \$CMD\" >> \"$DEBUG_LOG\"
             script -q -c \"\$CMD\" /dev/null <&3 >> \"$LOG_FILE\" 2>&1

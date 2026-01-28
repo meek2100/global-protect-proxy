@@ -50,8 +50,9 @@ FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 # MINIMAL RUNTIME DEPENDENCIES
+# - dbus: Required for IPC between gpclient and gpservice
 RUN apt-get update && apt-get install -y \
-    microsocks python3 iptables iproute2 util-linux procps tzdata \
+    microsocks python3 iptables iproute2 util-linux procps tzdata dbus \
     vpnc-scripts ca-certificates \
     libxml2 libgnutls30t64 liblz4-1 libpsl5 libsecret-1-0 openssl \
     sudo \
@@ -72,13 +73,15 @@ COPY --from=builder \
     /usr/src/app/target/release/gpauth \
     /usr/bin/
 
-# Set capabilities
+# Set capabilities and REFRESH LINKER CACHE
 RUN apt-get update && apt-get install -y libcap2-bin && \
     setcap 'cap_net_admin,cap_net_bind_service+ep' /usr/bin/gpservice && \
+    ldconfig && \
     rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \
-    chown -R gpuser:gpuser /var/www/html /tmp/gp-logs /run/dbus
+# Setup Directories
+RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus /var/run/dbus && \
+    chown -R gpuser:gpuser /var/www/html /tmp/gp-logs /run/dbus /var/run/dbus
 
 COPY server.py /var/www/html/server.py
 COPY index.html /var/www/html/index.html
