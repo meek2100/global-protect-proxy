@@ -1,3 +1,4 @@
+# File: Dockerfile
 # --- Build Stage ---
 FROM rust:trixie AS builder
 

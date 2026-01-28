@@ -1,4 +1,4 @@
-# File: .github/workflows/pre-commit-sync.yaml
+# File: .github/workflows/pre-commit-sync.yml
 name: Dependabot Pre-Commit Sync
 
 on:

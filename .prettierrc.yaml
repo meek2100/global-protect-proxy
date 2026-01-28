@@ -1,3 +1,4 @@
+# File: .prettierrc.yaml
 # Aligns with Python/Ruff standards (120 chars)
 tabWidth: 4
 useTabs: false

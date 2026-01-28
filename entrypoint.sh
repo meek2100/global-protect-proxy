@@ -1,4 +1,5 @@
 #!/bin/bash
+# File: entrypoint.sh
 set -e
 
 # --- FIX: Ensure administrative commands (ip, iptables) are in PATH ---

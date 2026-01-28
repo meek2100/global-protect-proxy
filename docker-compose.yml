@@ -1,3 +1,4 @@
+# File: docker-compose.yml
 services:
   vpn-proxy:
     image: ghcr.io/meek2100/global-protect-proxy:latest
