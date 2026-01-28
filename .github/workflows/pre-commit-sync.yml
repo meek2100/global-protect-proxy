@@ -6,12 +6,7 @@ on:
     types: [opened, synchronize]
     branches: ["dependabot/**"]
     paths:
-      - "Dockerfile"
-      - "entrypoint.sh"
-      - "server.py"
-      - ".pre-commit-config.yaml"
       - "pyproject.toml"
-      - ".github/workflows/*"
   workflow_dispatch:
 
 permissions:
