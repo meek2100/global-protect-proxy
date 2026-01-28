@@ -54,6 +54,21 @@ cleanup() {
 }
 trap cleanup SIGTERM SIGINT
 
+# --- LOG ROTATION ---
+check_log_size() {
+    # Limit logs to 10MB to prevent container disk exhaustion
+    local max_size=10485760
+    for logfile in "$CLIENT_LOG" "$SERVICE_LOG"; do
+        if [ -f "$logfile" ]; then
+            local size
+            size=$(stat -c%s "$logfile")
+            if [ "$size" -gt "$max_size" ]; then
+                echo "[$(date)] Log truncated due to size limit." >"$logfile"
+            fi
+        fi
+    done
+}
+
 # --- WATCHDOG ---
 check_services() {
     # 1. Web UI Check
@@ -63,7 +78,6 @@ check_services() {
     fi
 
     # 2. GlobalProtect Service Check
-    # FIXED: Use -f to match the full command line.
     if ! pgrep -f "gpservice" >/dev/null; then
         log "ERROR" "CRITICAL: gpservice died."
 
@@ -72,10 +86,7 @@ check_services() {
         ps aux >&2
 
         log "ERROR" "--- DUMPING LOGS (Last 50 lines) ---"
-        # FIX: Write to stderr (>&2) instead of appending to the file we are reading (SC2094)
         tail -n 50 "$SERVICE_LOG" >&2
-
-        # exit 1  <-- DISABLED FOR DEBUGGING as requested
     fi
 }
 
@@ -186,10 +197,6 @@ log "INFO" "Starting Services..."
 dns_watchdog &
 
 # FIX: Start gpservice via bash pipe to filter out benign error noise.
-# We use grep --line-buffered to ensure real logs appear instantly.
-# This filters:
-# 1. "Failed to start WS server" (Expected in headless mode)
-# 2. "Error: No such file or directory (os error 2)" (Cleanup artifact)
 runuser -u gpuser -- bash -c "
     /usr/bin/gpservice 2>&1 | \
     grep --line-buffered -v -E 'Failed to start WS server|Error: No such file or directory \(os error 2\)' \
@@ -205,7 +212,6 @@ runuser -u gpuser -- env VPN_MODE="$VPN_MODE" LOG_LEVEL="$LOG_LEVEL" \
     python3 -u /var/www/html/server.py >>"$SERVICE_LOG" 2>&1 &
 
 # FIX: Stream logs to Docker stdout in background
-# 'tail -F' follows retries if file is recreated
 tail -F "$SERVICE_LOG" "$CLIENT_LOG" &
 
 # Grace period for services to settle before we start checking them
@@ -214,6 +220,7 @@ sleep 3
 # --- 7. MAIN LOOP ---
 while true; do
     check_services
+    check_log_size
 
     if read -r -t 2 _ <"$PIPE_CONTROL"; then
         log "INFO" "Signal received. Starting gpclient..."

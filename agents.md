@@ -10,7 +10,7 @@ This project encapsulates a GlobalProtect VPN client inside a Docker container, 
 
 **Strict linting and formatting are enforced via CI and Pre-commit hooks.** Any code changes must adhere to these standards to pass the `lint` workflow.
 
-- **Python:** Uses `ruff` for formatting (line length 120) and linting.
+- **Python:** Uses `ruff` for formatting (line length 120) and linting. **Strict typing is required.** The project uses Python 3.14.
 - **Shell:** Uses `shellcheck` (gcc format).
 - **Formatting:** Uses `prettier` for Markdown, YAML, HTML, and JSON.
 - **YAML:** Uses `yamllint` (relaxed mode, max 120 chars).
@@ -29,6 +29,7 @@ The system uses a "Split Brain" architecture for stability:
     - **Watchdogs:**
         - **Service Watchdog:** Restarts container if `server.py` or `gpservice` dies.
         - **DNS Watchdog:** Monitors `/etc/resolv.conf` for VPN-pushed DNS changes and dynamically updates `iptables` NAT rules to ensure traffic forwarding works.
+        - **Log Watchdog:** Truncates log files if they exceed 10MB to prevent disk exhaustion.
     - Manages the `gpclient` process.
 
 ### Privilege Separation Strategy
@@ -38,6 +39,7 @@ The container operates primarily as the non-root user `gpuser` to secure the web
 - **`gpuser`:** Runs `server.py`, `microsocks`, and `gpservice`.
 - **`gpservice`:** Granted `cap_net_admin` and `cap_net_bind_service` capabilities to manage network interfaces without running as full root.
 - **`sudo gpclient`:** The connection client runs as `root` (invoked via passwordless `sudo` by `gpuser`) to perform `TUNSETIFF` operations on the kernel.
+    - **Restriction:** `gpuser` is strictly limited in `/etc/sudoers` to only execute `/usr/bin/gpclient` and `/usr/bin/pkill`.
 
 ### Health Checks
 

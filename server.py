@@ -11,17 +11,18 @@ import shutil
 import subprocess
 import time
 from collections import deque
+from pathlib import Path
+from typing import List, Any, Optional, TypedDict
 
 # --- Configuration ---
 PORT = 8001
-FIFO_STDIN = "/tmp/gp-stdin"
-FIFO_CONTROL = "/tmp/gp-control"
-CLIENT_LOG = "/tmp/gp-logs/gp-client.log"
-MODE_FILE = "/tmp/gp-mode"
-SERVICE_LOG = "/tmp/gp-logs/gp-service.log"
+FIFO_STDIN = Path("/tmp/gp-stdin")
+FIFO_CONTROL = Path("/tmp/gp-control")
+CLIENT_LOG = Path("/tmp/gp-logs/gp-client.log")
+MODE_FILE = Path("/tmp/gp-mode")
+SERVICE_LOG = Path("/tmp/gp-logs/gp-service.log")
 
 # --- Logging Setup ---
-# Unified Logging Format: Matches Rust and Entrypoint (ISO 8601 + Z)
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "DEBUG").upper(),
     format="[%(asctime)s] [%(levelname)s] %(message)s",
@@ -33,43 +34,62 @@ logging.basicConfig(
 )
 logger = logging.getLogger()
 
-last_known_state = None
+last_known_state: Optional[str] = None
 
 
-def strip_ansi(text):
+class VPNState(TypedDict):
+    """Type definition for the VPN state response."""
+
+    state: str
+    url: str
+    prompt: str
+    input_type: str
+    options: List[str]
+    error: str
+    log: str
+    debug_mode: bool
+    vpn_mode: str
+
+
+def strip_ansi(text: str) -> str:
     """
-    Aggressively removes ANSI escape sequences to reveal pure text.
+    Aggressively remove ANSI escape sequences to reveal pure text.
     Handles colors, cursor movements, and line clearing.
     """
     ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
     return ansi_escape.sub("", text)
 
 
-def get_vpn_state():
+def get_vpn_state() -> VPNState:
     """
-    Parses the VPN log to determine the current state of the connection process.
+    Parse the VPN log to determine the current state of the connection process.
+
+    Returns:
+        VPNState: A dictionary containing the current status, prompts, and debug logs.
     """
     global last_known_state
     current_state = "idle"
     is_debug = os.getenv("LOG_LEVEL", "INFO").upper() in ["DEBUG", "TRACE"]
-
-    # Capture the operational mode passed from entrypoint
     vpn_mode = os.getenv("VPN_MODE", "standard")
 
     # 1. Check Mode File
-    if os.path.exists(MODE_FILE):
+    if MODE_FILE.exists():
         try:
-            with open(MODE_FILE, "r") as f:
-                content = f.read().strip()
-                if content == "active":
-                    current_state = "connecting"
-                elif content == "idle":
-                    return {
-                        "state": "idle",
-                        "log": "Ready.",
-                        "debug_mode": is_debug,
-                        "vpn_mode": vpn_mode,
-                    }
+            content = MODE_FILE.read_text().strip()
+            if content == "active":
+                current_state = "connecting"
+            elif content == "idle":
+                return {
+                    "state": "idle",
+                    "url": "",
+                    "prompt": "",
+                    "input_type": "text",
+                    "options": [],
+                    "error": "",
+                    "log": "Ready.",
+                    "debug_mode": is_debug,
+                    "vpn_mode": vpn_mode,
+                }
         except Exception:
             pass
 
@@ -77,18 +97,24 @@ def get_vpn_state():
     sso_url = ""
     prompt_msg = ""
     prompt_type = "text"
-    input_options = []
+    input_options: List[str] = []
     error_msg = ""
 
-    # 2. Parse Logs
-    if os.path.exists(CLIENT_LOG):
+    # 2. Parse Logs (Optimized with Seek)
+    if CLIENT_LOG.exists():
         try:
+            file_size = CLIENT_LOG.stat().st_size
             with open(CLIENT_LOG, "r", errors="replace") as f:
+                # Optimization: Only read the last 64KB to avoid O(N) on large logs
+                if file_size > 65536:
+                    f.seek(file_size - 65536)
+                    f.readline()  # Discard partial line
+
                 lines = list(deque(f, maxlen=300))
                 log_content = "".join(lines)
-                # FIX: Renamed 'l' to 'line' to satisfy Ruff E741
                 clean_lines = [strip_ansi(line).strip() for line in lines[-100:]]
 
+                # Determine State
                 for line in reversed(clean_lines):
                     if "Connected" in line and "to" in line:
                         current_state = "connected"
@@ -114,9 +140,8 @@ def get_vpn_state():
                                 r"(?:>|\s)*([A-Za-z0-9\-\.]+\s+\([A-Za-z0-9\-\.]+\))"
                             )
                             seen = set()
-                            # FIX: Renamed 'l' to 'line' to satisfy Ruff E741
-                            for line in clean_lines:
-                                m = gateway_regex.search(line)
+                            for scan_line in clean_lines:
+                                m = gateway_regex.search(scan_line)
                                 if m:
                                     opt = m.group(1).strip()
                                     if opt not in seen and "Which gateway" not in opt:
@@ -173,13 +198,17 @@ def get_vpn_state():
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
-    # FIX: Override log_message to enforce consistent logging style
-    def log_message(self, format, *args):
-        # Redirects default HTTP logs (e.g. "GET /status.json 200") to our unified logger.
-        # This ensures they get the [YYYY-MM-DDTHH:MM:SSZ] prefix.
+    """
+    Custom HTTP Request Handler for the VPN Web UI.
+    Handles API endpoints for status, connections, and log downloads.
+    """
+
+    def log_message(self, format: str, *args: Any) -> None:
+        """Redirect default HTTP logs to the unified logger."""
         logger.info("%s - - %s", self.client_address[0], format % args)
 
-    def do_GET(self):
+    def do_GET(self) -> None:
+        """Handle GET requests."""
         if self.path.startswith("/status.json"):
             self.send_response(200)
             self.send_header("Content-type", "application/json")
@@ -203,12 +232,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
 
                 self.wfile.write(b"=== SERVICE LOG (Wrapper/UI) ===\n\n")
-                if os.path.exists(SERVICE_LOG):
+                if SERVICE_LOG.exists():
                     with open(SERVICE_LOG, "rb") as f:
                         shutil.copyfileobj(f, self.wfile)
 
                 self.wfile.write(b"\n\n=== CLIENT LOG (GlobalProtect) ===\n\n")
-                if os.path.exists(CLIENT_LOG):
+                if CLIENT_LOG.exists():
                     with open(CLIENT_LOG, "rb") as f:
                         shutil.copyfileobj(f, self.wfile)
             except Exception:
@@ -217,9 +246,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         if self.path == "/":
             self.path = "/index.html"
-        return http.server.SimpleHTTPRequestHandler.do_GET(self)
+        return super().do_GET()
 
-    def do_POST(self):
+    def do_POST(self) -> None:
+        """Handle POST requests for connection control."""
         if self.path == "/connect":
             logger.info("User requested Connection")
             subprocess.run(["sudo", "pkill", "gpclient"], stderr=subprocess.DEVNULL)
@@ -268,7 +298,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     os.chdir("/var/www/html")
-    if not os.path.exists(FIFO_CONTROL):
+    if not FIFO_CONTROL.exists():
         os.mkfifo(FIFO_CONTROL)
         os.chmod(FIFO_CONTROL, 0o666)
 

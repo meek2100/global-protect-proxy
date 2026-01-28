@@ -43,15 +43,19 @@ RUN cargo build --release --bin gpclient --no-default-features && \
     strip target/release/gpclient target/release/gpservice target/release/gpauth
 
 # --- Runtime Stage ---
-FROM debian:trixie-slim
+# CHANGED: Use official Python 3.14 image
+FROM python:3.14-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 # MINIMAL RUNTIME DEPENDENCIES
-# - tzdata: For Timezone support
-# - procps: For pkill/pgrep (Required for Watchdog/Shutdown)
+# - python3: Already provided by base image
+# - microsocks: Required for SOCKS5 proxy
+# - vpnc-scripts: Required by openconnect
+# - iptables/iproute2: Required for networking
+# - sudo: Required for privilege escalation wrapper
 RUN apt-get update && apt-get install -y \
-    microsocks python3 iptables iproute2 util-linux procps tzdata \
+    microsocks iptables iproute2 util-linux procps tzdata \
     vpnc-scripts ca-certificates \
     libxml2 libgnutls30t64 liblz4-1 libpsl5 libsecret-1-0 openssl \
     sudo \
@@ -60,8 +64,9 @@ RUN apt-get update && apt-get install -y \
 
 RUN useradd -m -s /bin/bash gpuser
 
-# Configure passwordless sudo for gpuser (Restored to Working State)
-RUN echo "gpuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gpuser && \
+# Configure strict passwordless sudo for gpuser
+# Only allow gpclient and pkill, not ALL
+RUN echo "gpuser ALL=(root) NOPASSWD: /usr/bin/gpclient, /usr/bin/pkill" > /etc/sudoers.d/gpuser && \
     chmod 0440 /etc/sudoers.d/gpuser
 
 # Combine COPY instructions

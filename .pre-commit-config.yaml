@@ -76,3 +76,22 @@ repos:
     hooks:
       - id: docker-compose-check
         files: ^docker-compose\.yml$
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        exclude: ^(poetry\.lock|package-lock\.json)$
+        args: ["--ignore-words-list", "afterAll, COo"]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: "v1.19.1"
+    hooks:
+      - id: mypy
+        files: '\.py$'
+
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.408
+    hooks:
+      - id: pyright
+        files: '\.py$'
