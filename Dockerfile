@@ -60,11 +60,9 @@ RUN apt-get update && apt-get install -y \
 
 RUN useradd -m -s /bin/bash gpuser
 
-# SECURITY: Least Privilege Sudo
-# - gpclient: To run the VPN
-# - pkill: To disconnect/reset
-# - stdbuf: To stream logs in real-time (Fixes start-up failure)
-RUN echo "gpuser ALL=(root) NOPASSWD: /usr/bin/gpclient, /usr/bin/pkill, /usr/bin/stdbuf" > /etc/sudoers.d/gpuser && \
+# SECURITY: Reverted to Permissive Mode for Troubleshooting
+# This allows gpuser to run ANY command as root via sudo.
+RUN echo "gpuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gpuser && \
     chmod 0440 /etc/sudoers.d/gpuser
 
 # Combine COPY instructions
@@ -74,7 +72,7 @@ COPY --from=builder \
     /usr/src/app/target/release/gpauth \
     /usr/bin/
 
-# Set capabilities for gpservice
+# Set capabilities
 RUN apt-get update && apt-get install -y libcap2-bin && \
     setcap 'cap_net_admin,cap_net_bind_service+ep' /usr/bin/gpservice && \
     rm -rf /var/lib/apt/lists/*
