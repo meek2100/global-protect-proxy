@@ -49,7 +49,7 @@ repos:
         args: ["--format=gcc"]
 
   - repo: https://github.com/scop/pre-commit-shfmt
-    rev: v3.10.0
+    rev: v3.12.0-2
     hooks:
       - id: shfmt
         args: ["-w", "-i", "4", "-ci"]
