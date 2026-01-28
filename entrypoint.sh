@@ -20,12 +20,9 @@ PIPE_CONTROL="/tmp/gp-control"
 : "${GP_ARGS:=}"
 
 # Apply Timezone
-ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone
 
 # --- LOGGING HELPER ---
-declare -A LOG_PRIORITY
-LOG_PRIORITY=( ["TRACE"]=10 ["DEBUG"]=20 ["INFO"]=30 ["WARN"]=40 ["ERROR"]=50 )
-
 log() {
     local level="$1"
     local msg="$2"
@@ -38,7 +35,8 @@ log() {
     esac
 
     if [ "$should_log" = true ]; then
-        local timestamp=$(date +'%Y-%m-%dT%H:%M:%S')
+        local timestamp
+        timestamp=$(date +'%Y-%m-%dT%H:%M:%S')
         echo "[$timestamp] [$level] $msg" >> "$DEBUG_LOG"
         echo "[$timestamp] [$level] $msg" >&2
     fi
@@ -48,7 +46,7 @@ log() {
 cleanup() {
     log "WARN" "Received Shutdown Signal"
     sudo pkill gpclient || true
-    kill $(jobs -p) 2>/dev/null || true
+    kill "$(jobs -p)" 2>/dev/null || true
     exit 0
 }
 trap cleanup SIGTERM SIGINT
@@ -201,7 +199,7 @@ sleep 3
 while true; do
     check_services
 
-    if read -t 2 _ < "$PIPE_CONTROL"; then
+    if read -r -t 2 _ < "$PIPE_CONTROL"; then
         log "INFO" "Signal received. Starting gpclient..."
         echo "active" > "$MODE_FILE"
 

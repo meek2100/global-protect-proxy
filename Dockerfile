@@ -22,6 +22,9 @@ RUN git clone --branch v2.5.1 https://github.com/yuezk/GlobalProtect-openconnect
     git config submodule.crates/openconnect/deps/libxml2.url https://github.com/GNOME/libxml2.git && \
     git submodule update --recursive
 
+# Set shell to bash with pipefail for safety in next commands
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # PATCH: Disable Root Check
 RUN grep -rl "cannot be run as root" . | xargs sed -i 's/if.*root.*/if false {/'
 
@@ -33,17 +36,11 @@ ENV CARGO_PROFILE_RELEASE_LTO=thin \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
     CARGO_PROFILE_RELEASE_PANIC=abort
 
-# 1. Build gpclient
-RUN cargo build --release --bin gpclient --no-default-features
-
-# 2. Build gpservice
-RUN cargo build --release --bin gpservice
-
-# 3. Build gpauth (Headless)
-RUN cargo build --release --bin gpauth --no-default-features
-
-# OPTIMIZATION: Strip debug symbols
-RUN strip target/release/gpclient target/release/gpservice target/release/gpauth
+# Build all binaries and strip in one layer
+RUN cargo build --release --bin gpclient --no-default-features && \
+    cargo build --release --bin gpservice && \
+    cargo build --release --bin gpauth --no-default-features && \
+    strip target/release/gpclient target/release/gpservice target/release/gpauth
 
 # --- Runtime Stage ---
 FROM debian:trixie-slim
@@ -76,7 +73,7 @@ COPY --from=builder \
 
 # Set capabilities and refresh library cache
 # 'ldconfig' is crucial here so gpservice finds libs without LD_LIBRARY_PATH
-RUN apt-get update && apt-get install -y libcap2-bin && \
+RUN apt-get update && apt-get install -y --no-install-recommends libcap2-bin && \
     setcap 'cap_net_admin,cap_net_bind_service+ep' /usr/bin/gpservice && \
     ldconfig && \
     rm -rf /var/lib/apt/lists/*
