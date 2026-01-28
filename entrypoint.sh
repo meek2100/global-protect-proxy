@@ -20,7 +20,7 @@ PIPE_CONTROL="/tmp/gp-control"
 : "${GP_ARGS:=}"
 
 # Apply Timezone
-ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone
+ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" >/etc/timezone
 
 # --- LOGGING HELPER ---
 log() {
@@ -30,14 +30,14 @@ log() {
     case "$LOG_LEVEL" in
         TRACE) should_log=true ;;
         DEBUG) [[ "$level" != "TRACE" ]] && should_log=true ;;
-        INFO)  [[ "$level" == "INFO" || "$level" == "WARN" || "$level" == "ERROR" ]] && should_log=true ;;
-        *)     [[ "$level" == "INFO" || "$level" == "WARN" || "$level" == "ERROR" ]] && should_log=true ;;
+        INFO) [[ "$level" == "INFO" || "$level" == "WARN" || "$level" == "ERROR" ]] && should_log=true ;;
+        *) [[ "$level" == "INFO" || "$level" == "WARN" || "$level" == "ERROR" ]] && should_log=true ;;
     esac
 
     if [ "$should_log" = true ]; then
         local timestamp
         timestamp=$(date +'%Y-%m-%dT%H:%M:%S')
-        echo "[$timestamp] [$level] $msg" >> "$DEBUG_LOG"
+        echo "[$timestamp] [$level] $msg" >>"$DEBUG_LOG"
         echo "[$timestamp] [$level] $msg" >&2
     fi
 }
@@ -53,14 +53,14 @@ trap cleanup SIGTERM SIGINT
 
 # --- WATCHDOG ---
 check_services() {
-    if ! pgrep -f server.py > /dev/null; then
+    if ! pgrep -f server.py >/dev/null; then
         log "ERROR" "CRITICAL: Web UI (server.py) died."
         log "ERROR" "--- DUMPING LOGS ---"
         cat "$DEBUG_LOG" >&2
         log "ERROR" "--------------------"
     fi
 
-    if ! pgrep -u gpuser gpservice > /dev/null; then
+    if ! pgrep -u gpuser gpservice >/dev/null; then
         log "ERROR" "CRITICAL: gpservice died."
         log "ERROR" "--- DUMPING LOGS (Last 50 lines) ---"
         tail -n 50 "$DEBUG_LOG" >&2
@@ -83,7 +83,7 @@ dns_watchdog() {
                         break
                     fi
                 fi
-            done < /etc/resolv.conf
+            done </etc/resolv.conf
         fi
 
         if [ -n "$current_dns" ] && [ "$current_dns" != "$last_dns" ]; then
@@ -137,9 +137,9 @@ fi
 
 if [ -n "$DNS_TO_APPLY" ]; then
     log "INFO" "Overwriting /etc/resolv.conf"
-    echo "options ndots:0" > /etc/resolv.conf
+    echo "options ndots:0" >/etc/resolv.conf
     for ip in $DNS_TO_APPLY; do
-        echo "nameserver $ip" >> /etc/resolv.conf
+        echo "nameserver $ip" >>/etc/resolv.conf
     done
 fi
 
@@ -150,7 +150,7 @@ iptables -A INPUT -p tcp --dport 8001 -j ACCEPT
 
 if [ "$VPN_MODE" = "gateway" ] || [ "$VPN_MODE" = "standard" ]; then
     if [ "$(cat /proc/sys/net/ipv4/ip_forward)" != "1" ]; then
-        echo 1 > /proc/sys/net/ipv4/ip_forward
+        echo 1 >/proc/sys/net/ipv4/ip_forward
     fi
     iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
     iptables -A FORWARD -i eth0 -o tun0 -j ACCEPT
@@ -168,7 +168,7 @@ mkfifo "$PIPE_STDIN" "$PIPE_CONTROL"
 mkdir -p /tmp/gp-logs
 touch "$LOG_FILE" "$DEBUG_LOG"
 chown -R gpuser:gpuser /tmp/gp-logs /var/www/html "$PIPE_STDIN" "$PIPE_CONTROL"
-echo "idle" > "$MODE_FILE"
+echo "idle" >"$MODE_FILE"
 chmod 644 "$MODE_FILE"
 
 # --- 6. START SERVICES ---
@@ -199,9 +199,9 @@ sleep 3
 while true; do
     check_services
 
-    if read -r -t 2 _ < "$PIPE_CONTROL"; then
+    if read -r -t 2 _ <"$PIPE_CONTROL"; then
         log "INFO" "Signal received. Starting gpclient..."
-        echo "active" > "$MODE_FILE"
+        echo "active" >"$MODE_FILE"
 
         su - gpuser -c "
             export VPN_PORTAL=\"$VPN_PORTAL\"
@@ -216,6 +216,6 @@ while true; do
         "
 
         log "WARN" "gpclient exited."
-        echo "idle" > "$MODE_FILE"
+        echo "idle" >"$MODE_FILE"
     fi
 done
