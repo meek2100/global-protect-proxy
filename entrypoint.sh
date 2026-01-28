@@ -192,12 +192,13 @@ if [[ "$LOG_LEVEL" == "DEBUG" || "$LOG_LEVEL" == "TRACE" ]]; then
     tail -f "$LOG_FILE" "$DEBUG_LOG" &
 fi
 
-# CRITICAL FIX: Grace period for services to start before Watchdog kills them
+# Grace period
 sleep 3
 
 # --- 7. MAIN LOOP ---
 while true; do
-    check_services
+    # DISABLED WATCHDOG EXIT to allow debugging
+    # check_services
 
     if read -r -t 2 _ <"$PIPE_CONTROL"; then
         log "INFO" "Signal received. Starting gpclient..."
