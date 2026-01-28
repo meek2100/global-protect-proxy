@@ -4,9 +4,6 @@ FROM rust:trixie AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
 # 1. Install Build Dependencies
-# We include libwebkit2gtk-4.1-dev here as a safety net.
-# Even though we build with --no-default-features, having the headers prevents
-# 'pkg-config' errors if the build script checks environment before features.
 RUN apt-get update && apt-get install -y \
     build-essential cmake git \
     libssl-dev libxml2-dev \
@@ -23,22 +20,26 @@ RUN git clone --branch v2.5.1 --recursive https://github.com/yuezk/GlobalProtect
 RUN grep -rl "cannot be run as root" . | xargs sed -i 's/if.*root.*/if false {/'
 
 # PATCH: Force no_gui mode in gpservice
-# This ensures gpservice doesn't try to pop up windows.
 RUN sed -i 's/let no_gui = false;/let no_gui = true;/' apps/gpservice/src/cli.rs
 
-# --- COMPILATION (The Magic Step) ---
+# --- COMPILATION (Headless Strategy) ---
 
-# 1. Build gpclient (CLI Client)
-# --no-default-features: Disables "webview-auth" (cleans up help text/flags)
+# Optimization: Maximize performance and minimize size
+ENV CARGO_PROFILE_RELEASE_LTO=true \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+    CARGO_PROFILE_RELEASE_PANIC=abort
+
+# 1. Build gpclient
 RUN cargo build --release --bin gpclient --no-default-features
 
-# 2. Build gpservice (Background Service)
+# 2. Build gpservice
 RUN cargo build --release --bin gpservice
 
-# 3. Build gpauth (Authenticator)
-# --no-default-features: CRITICAL. This drops Tauri/WebKit/GTK.
-# Result: A tiny binary that only does CLI/SAML auth.
+# 3. Build gpauth
 RUN cargo build --release --bin gpauth --no-default-features
+
+# Optimization: Strip symbols to reduce size
+RUN strip target/release/gpclient target/release/gpservice target/release/gpauth
 
 # --- Runtime Stage ---
 FROM debian:trixie-slim
@@ -46,10 +47,8 @@ FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 # MINIMAL RUNTIME DEPENDENCIES
-# We explicitly EXCLUDE libwebkit2gtk, libgtk-3, and X11 libs.
-# Since we built with --no-default-features, the binaries will not link to them.
 RUN apt-get update && apt-get install -y \
-    microsocks python3 iptables iproute2 \
+    microsocks python3 iptables iproute2 util-linux \
     vpnc-scripts ca-certificates \
     libxml2 libgnutls30t64 liblz4-1 libpsl5 libsecret-1-0 openssl \
     sudo \
