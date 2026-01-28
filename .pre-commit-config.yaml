@@ -2,6 +2,7 @@
 exclude: ^(.*\.min\.(css|js))
 
 repos:
+  # 1. FAST SYNTAX CHECKS (Fail fast)
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -22,6 +23,19 @@ repos:
       - id: check-executables-have-shebangs
       - id: check-shebang-scripts-are-executable
 
+  # 2. FILE HEADERS (Modifies files, so run early)
+  - repo: https://github.com/meek2100/pre-commit-context-header
+    rev: v0.1.0
+    hooks:
+      - id: context-headers
+        args: ["--fix"]
+
+  # 3. FORMATTERS (Run before linters to fix issues automatically)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.14
+    hooks:
+      - id: ruff-format # Pure formatting
+
   - repo: https://github.com/rbubley/mirrors-prettier
     rev: "v3.8.1"
     hooks:
@@ -29,17 +43,17 @@ repos:
         types_or: [css, javascript, html, json, yaml, markdown]
         args: ["--config", ".prettierrc.yaml"]
 
-  - repo: https://github.com/meek2100/pre-commit-context-header
-    rev: v0.1.0
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.12.0-2
     hooks:
-      - id: context-headers
-        args: ["--fix"]
+      - id: shfmt
+        args: ["-w", "-i", "4", "-ci"]
 
+  # 4. LINTERS (Check code quality)
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.14
     hooks:
-      - id: ruff-format
-      - id: ruff-check
+      - id: ruff-check # Linting logic
         args: ["--fix"]
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
@@ -48,35 +62,6 @@ repos:
       - id: shellcheck
         args: ["--format=gcc"]
 
-  - repo: https://github.com/scop/pre-commit-shfmt
-    rev: v3.12.0-2
-    hooks:
-      - id: shfmt
-        args: ["-w", "-i", "4", "-ci"]
-
-  - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.7
-    hooks:
-      - id: actionlint
-
-  - repo: https://github.com/AleksaC/hadolint-py
-    rev: v2.14.0
-    hooks:
-      - id: hadolint
-        args: ["--ignore", "DL3008"]
-
-  - repo: https://github.com/adrienverge/yamllint
-    rev: v1.38.0
-    hooks:
-      - id: yamllint
-        args: ["--config-file", ".yamllint.yaml"]
-
-  - repo: https://github.com/IamTheFij/docker-pre-commit
-    rev: v3.0.1
-    hooks:
-      - id: docker-compose-check
-        files: ^docker-compose\.yml$
-
   - repo: https://github.com/codespell-project/codespell
     rev: v2.4.1
     hooks:
@@ -84,11 +69,37 @@ repos:
         exclude: ^(poetry\.lock|package-lock\.json)$
         args: ["--ignore-words-list", "afterAll, COo"]
 
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        args: ["--config-file", ".yamllint.yaml"]
+
+  - repo: https://github.com/AleksaC/hadolint-py
+    rev: v2.14.0
+    hooks:
+      - id: hadolint
+        args: ["--ignore", "DL3008"]
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
+
+  - repo: https://github.com/IamTheFij/docker-pre-commit
+    rev: v3.0.1
+    hooks:
+      - id: docker-compose-check
+        files: ^docker-compose\.yml$
+
+  # 5. TYPE CHECKERS (Slowest, run last)
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: "v1.19.1"
     hooks:
       - id: mypy
         files: '\.py$'
+        # Ensure mypy knows about your types
+        additional_dependencies: [types-requests]
 
   - repo: https://github.com/RobertCraigie/pyright-python
     rev: v1.1.408
