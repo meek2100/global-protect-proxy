@@ -19,6 +19,9 @@ PIPE_CONTROL="/tmp/gp-control"
 : "${DNS_SERVERS:=}"
 : "${GP_ARGS:=}"
 
+# Disable ANSI colors in Rust binaries (Fixes log artifacting)
+export RUST_LOG_STYLE=never
+
 # Apply Timezone
 ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" >/etc/timezone
 
@@ -53,19 +56,26 @@ trap cleanup SIGTERM SIGINT
 
 # --- WATCHDOG ---
 check_services() {
+    # 1. Web UI Check
     if ! pgrep -f server.py >/dev/null; then
         log "ERROR" "CRITICAL: Web UI (server.py) died."
-        log "ERROR" "--- DUMPING LOGS ---"
-        cat "$DEBUG_LOG" >&2
-        log "ERROR" "--------------------"
+        exit 1
     fi
 
-    if ! pgrep -u gpuser gpservice >/dev/null; then
+    # 2. GlobalProtect Service Check
+    # FIXED: Use -f to match the full command line.
+    if ! pgrep -f "gpservice" >/dev/null; then
         log "ERROR" "CRITICAL: gpservice died."
+
+        # DEBUG: Dump process list to see what IS running
+        log "ERROR" "--- PROCESS LIST (DEBUG) ---"
+        ps aux >&2
+
         log "ERROR" "--- DUMPING LOGS (Last 50 lines) ---"
+        # FIX: Write to stderr instead of appending to self (SC2094)
         tail -n 50 "$DEBUG_LOG" >&2
-        log "ERROR" "--------------------"
-        exit 1
+
+        # exit 1  <-- DISABLED FOR DEBUGGING as requested
     fi
 }
 
@@ -175,41 +185,40 @@ chmod 644 "$MODE_FILE"
 log "INFO" "Starting Services..."
 dns_watchdog &
 
-# Use "su - gpuser" (Working State)
-# Background services need time to spawn before watchdog checks them
-su - gpuser -c "/usr/bin/gpservice >> \"$DEBUG_LOG\" 2>&1 &"
+# FIX: Use 'runuser' instead of 'su' to avoid intermediate shell PIDs hiding the process.
+# This prevents the Watchdog from accidentally killing a healthy service.
+runuser -u gpuser -- /usr/bin/gpservice >>"$DEBUG_LOG" 2>&1 &
 
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
-    su - gpuser -c "microsocks -i 0.0.0.0 -p 1080 > /dev/null 2>&1 &"
+    runuser -u gpuser -- microsocks -i 0.0.0.0 -p 1080 >/dev/null 2>&1 &
 fi
 
-# Use -u for unbuffered logs (Production Feature)
-su - gpuser -c "export LOG_LEVEL='$LOG_LEVEL'; python3 -u /var/www/html/server.py >> \"$DEBUG_LOG\" 2>&1 &"
+# Pass configuration to Server
+runuser -u gpuser -- env VPN_MODE="$VPN_MODE" LOG_LEVEL="$LOG_LEVEL" \
+    python3 -u /var/www/html/server.py >>"$DEBUG_LOG" 2>&1 &
 
-# Log Streaming (Production Feature)
-if [[ "$LOG_LEVEL" == "DEBUG" || "$LOG_LEVEL" == "TRACE" ]]; then
-    log "INFO" "Debug mode enabled. Streaming internal logs to stdout..."
-    tail -f "$LOG_FILE" "$DEBUG_LOG" &
-fi
+# FIX: Stream logs to Docker stdout in background
+# 'tail -F' follows retries if file is recreated
+tail -F "$DEBUG_LOG" "$LOG_FILE" &
 
-# Grace period
+# Grace period for services to settle before we start checking them
 sleep 3
 
 # --- 7. MAIN LOOP ---
 while true; do
-    # DISABLED WATCHDOG EXIT to allow debugging
-    # check_services
+    check_services
 
     if read -r -t 2 _ <"$PIPE_CONTROL"; then
         log "INFO" "Signal received. Starting gpclient..."
         echo "active" >"$MODE_FILE"
 
-        su - gpuser -c "
+        runuser -u gpuser -- bash -c "
             export VPN_PORTAL=\"$VPN_PORTAL\"
             export GP_ARGS=\"$GP_ARGS\"
             > \"$LOG_FILE\"
             exec 3<> \"$PIPE_STDIN\"
 
+            # Using sudo for gpclient to allow full network access
             CMD=\"sudo gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
 
             echo \"[Entrypoint] Executing: \$CMD\" >> \"$DEBUG_LOG\"

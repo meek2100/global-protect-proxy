@@ -33,7 +33,7 @@ jobs:
       # 1. EXPLICIT CACHING: This is the key to speed.
       # It caches the heavy environments (venvs) that pre-commit builds.
       - name: Cache pre-commit environments
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cache/pre-commit
           # Key invalidates if config changes, ensuring fresh envs when needed

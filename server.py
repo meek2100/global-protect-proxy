@@ -53,6 +53,9 @@ def get_vpn_state():
     current_state = "idle"
     is_debug = os.getenv("LOG_LEVEL", "INFO").upper() in ["DEBUG", "TRACE"]
 
+    # Capture the operational mode passed from entrypoint
+    vpn_mode = os.getenv("VPN_MODE", "standard")
+
     # 1. Check Mode File
     if os.path.exists(MODE_FILE):
         try:
@@ -61,7 +64,12 @@ def get_vpn_state():
                 if content == "active":
                     current_state = "connecting"
                 elif content == "idle":
-                    return {"state": "idle", "log": "Ready.", "debug_mode": is_debug}
+                    return {
+                        "state": "idle",
+                        "log": "Ready.",
+                        "debug_mode": is_debug,
+                        "vpn_mode": vpn_mode,
+                    }
         except Exception:
             pass
 
@@ -78,6 +86,7 @@ def get_vpn_state():
             with open(LOG_FILE, "r", errors="replace") as f:
                 lines = list(deque(f, maxlen=300))
                 log_content = "".join(lines)
+                # FIX: Renamed 'l' to 'raw_line' to fix E741
                 clean_lines = [
                     strip_ansi(raw_line).strip() for raw_line in lines[-100:]
                 ]
@@ -107,8 +116,9 @@ def get_vpn_state():
                                 r"(?:>|\s)*([A-Za-z0-9\-\.]+\s+\([A-Za-z0-9\-\.]+\))"
                             )
                             seen = set()
-                            for raw_line in clean_lines:
-                                m = gateway_regex.search(raw_line)
+                            # FIX: Renamed 'l' to 'line_content' to fix E741
+                            for line_content in clean_lines:
+                                m = gateway_regex.search(line_content)
                                 if m:
                                     opt = m.group(1).strip()
                                     if opt not in seen and "Which gateway" not in opt:
@@ -160,6 +170,7 @@ def get_vpn_state():
         "error": error_msg,
         "log": log_content,
         "debug_mode": is_debug,
+        "vpn_mode": vpn_mode,
     }
 
 
