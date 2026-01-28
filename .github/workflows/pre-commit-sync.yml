@@ -47,7 +47,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore(deps): update pre-commit hooks"
-          branch: "pre-commit-sync/${{ github.event.pull_request.head.ref }}"
+          branch: "pre-commit-sync-${{ github.event.pull_request.head.ref }}"
           title: "chore(deps): synchronize pre-commit hooks for ${{ github.event.pull_request.head.ref }}"
           body: |
             This PR synchronizes the `.pre-commit-config.yaml` hooks following a Dependabot update.
