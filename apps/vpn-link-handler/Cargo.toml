@@ -16,6 +16,9 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 
+[build-dependencies]
+winres = "0.1" # Standard crate for embedding Windows resources
+
 [dependencies]
 ureq = "2.9"        # Tiny, blocking HTTP client
 anyhow = "1.0"      # Error handling
