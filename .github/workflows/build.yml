@@ -33,7 +33,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "apps/vpn-link-handler -> target"
+          workspaces: "apps/gp-client-proxy -> target"
 
       - name: Set up Python
         uses: actions/setup-python@v6

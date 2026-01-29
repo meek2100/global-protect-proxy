@@ -109,7 +109,7 @@ repos:
       - id: rustfmt
         name: rustfmt
         description: Formats Rust code using rustfmt
-        entry: cargo fmt --manifest-path apps/vpn-link-handler/Cargo.toml --all
+        entry: cargo fmt --manifest-path apps/gp-client-proxy/Cargo.toml --all
         language: system
         types: [rust]
         pass_filenames: false
@@ -117,7 +117,7 @@ repos:
       - id: cargo-check
         name: cargo check
         description: fast check to ensure code compiles
-        entry: cargo check --manifest-path apps/vpn-link-handler/Cargo.toml --all-targets --all-features
+        entry: cargo check --manifest-path apps/gp-client-proxy/Cargo.toml --all-targets --all-features
         language: system
         types: [rust]
         pass_filenames: false
@@ -125,7 +125,7 @@ repos:
       - id: clippy
         name: cargo clippy
         description: Lint Rust code (equivalent to ruff for python)
-        entry: cargo clippy --manifest-path apps/vpn-link-handler/Cargo.toml --all-targets --all-features -- -D warnings
+        entry: cargo clippy --manifest-path apps/gp-client-proxy/Cargo.toml --all-targets --all-features -- -D warnings
         language: system
         types: [rust]
         pass_filenames: false

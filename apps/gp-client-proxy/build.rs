@@ -1,4 +1,4 @@
-// File: apps/vpn-link-handler/build.rs
+// File: apps/gp-client-proxy/build.rs
 fn main() {
     #[cfg(windows)]
     {

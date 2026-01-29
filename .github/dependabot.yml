@@ -13,8 +13,15 @@ updates:
     schedule:
       interval: "weekly"
 
-  # Maintain Python (pip) dependencies in pyproject.toml
+  # Maintain Python (pip) dependencies
   - package-ecosystem: "pip"
     directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # NEW: Maintain Rust (Cargo) dependencies
+  - package-ecosystem: "cargo"
+    # Points to the folder containing Cargo.toml
+    directory: "/apps/gp-client-proxy"
     schedule:
       interval: "weekly"
