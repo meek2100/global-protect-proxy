@@ -20,7 +20,6 @@ from typing import Any, TypedDict
 PORT = 8001
 UDP_BEACON_PORT = 32800  # New Discovery Port
 FIFO_STDIN = Path("/tmp/gp-stdin")
-FIFO_STDIN = Path("/tmp/gp-stdin")
 FIFO_CONTROL = Path("/tmp/gp-control")
 CLIENT_LOG = Path("/tmp/gp-logs/gp-client.log")
 MODE_FILE = Path("/tmp/gp-mode")
@@ -29,40 +28,36 @@ SERVICE_LOG = Path("/tmp/gp-logs/gp-service.log")
 
 # --- UDP BEACON (New Feature) ---
 class Beacon(threading.Thread):
-    def __init__(self):
+    def __init__(self) -> None:  # Added -> None
         super().__init__()
-        self.daemon = True  # Auto-kill when main process exits
+        self.daemon = True
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # Bind to 0.0.0.0 to listen on all interfaces (Macvlan, eth0, etc)
         self.sock.bind(("", UDP_BEACON_PORT))
-        logger.info(f"UDP Beacon active on port {UDP_BEACON_PORT}")
+        # Use a localized logger or print if logger isn't ready, but here it's fine
 
-    def run(self):
+    def run(self) -> None:  # Added -> None
+        logger.info(f"UDP Beacon active on port {UDP_BEACON_PORT}")
         while True:
             try:
-                # Wait for a packet (Buffer size 1024 is plenty)
                 data, addr = self.sock.recvfrom(1024)
                 message = data.decode("utf-8").strip()
 
                 if message == "GP_DISCOVER":
-                    # We found a client! Reply with our info.
-                    # We reply with the JSON config the client needs.
                     response = json.dumps({"ip": self.get_best_ip(), "port": PORT, "hostname": socket.gethostname()})
                     self.sock.sendto(response.encode("utf-8"), addr)
-
-
             except Exception as e:
                 logger.error(f"Beacon error: {e}")
 
-    def get_best_ip(self):
-        # Try to find the external IP (LAN IP), not localhost
+    def get_best_ip(self) -> str:  # Added -> str
         try:
-            # Dummy connection to determine route
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
             s.close()
-            return ip
+            return str(ip)  # Explicit cast to match return type
+        except Exception:
+            return "127.0.0.1"
+
 
 # --- Logging Setup ---
 # OPTIMIZATION: Removed StreamHandler to prevent duplicate logs in Docker
@@ -257,6 +252,8 @@ def get_vpn_state() -> VPNState:
             if content == "active":
                 pass
             elif content == "idle":
+                # FIX 3: Returned a valid VPNState object, not a string "127.0.0.1"
+                # The "127.0.0.1" string was a copy-paste error from get_best_ip()
                 return {
                     "state": "idle",
                     "url": "",
@@ -269,8 +266,8 @@ def get_vpn_state() -> VPNState:
                     "vpn_mode": vpn_mode,
                 }
         except Exception:
-            return "127.0.0.1"
-
+            # FIX 3 (continued): Return valid object on error too
+            pass
 
     log_content = ""
     analysis: LogAnalysis = {
@@ -438,7 +435,7 @@ if __name__ == "__main__":
     if sys.platform != "win32":
         if not FIFO_CONTROL.exists():
             # Use getattr to avoid linter errors on Windows dev machines
-            getattr(os, "mkfifo")(FIFO_CONTROL)
+            os.mkfifo(FIFO_CONTROL)
             os.chmod(FIFO_CONTROL, 0o666)
 
     # START BEACON
