@@ -5,7 +5,7 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
         <title>GP Proxy Client</title>
-        <link rel="icon" id="app-favicon" href="images/favicon.ico" />
+        <link rel="icon" id="app-favicon" href="assets/gp-proxy/favicon.ico" />
         <style>
             /* --- DESIGN SYSTEM (Restored) --- */
             :root {
@@ -390,7 +390,7 @@
                     <div style="margin-right: 24px; flex-shrink: 0">
                         <img
                             id="app-logo"
-                            src="images/logo-dark.png"
+                            src="assets/gp-proxy/logo-dark.png"
                             alt="GP Proxy Logo"
                             width="80"
                             height="80"
@@ -579,13 +579,13 @@
                 const favicon = document.getElementById("app-favicon");
 
                 if (theme === "dark") {
-                    // Dark Mode -> Needs Light colored assets
-                    logo.src = "images/logo-light.png";
-                    favicon.href = "images/favicon-light.ico";
+                    // Dark Mode -> Needs Light colored assets/gp-proxy
+                    logo.src = "assets/gp-proxy/logo-light.png";
+                    favicon.href = "assets/gp-proxy/favicon-light.ico";
                 } else {
-                    // Light Mode -> Needs Dark colored assets
-                    logo.src = "images/logo-dark.png";
-                    favicon.href = "images/favicon.ico";
+                    // Light Mode -> Needs Dark colored assets/gp-proxy
+                    logo.src = "assets/gp-proxy/logo-dark.png";
+                    favicon.href = "assets/gp-proxy/favicon.ico";
                 }
             }
 

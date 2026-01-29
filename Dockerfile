@@ -48,8 +48,6 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # 5. Install Runtime Dependencies
-# FIX: Added 'libcap2-bin' here to prevent autoremove issues later
-# FIX: Ensure 'iproute2' and 'iptables' are present
 RUN apt-get update && apt-get install -y --no-install-recommends \
     microsocks iptables iproute2 util-linux procps tzdata \
     vpnc-scripts ca-certificates \
@@ -71,7 +69,6 @@ COPY --from=builder \
 COPY --from=builder /usr/src/app/healthcheck /usr/bin/healthcheck
 
 # 8. Set Capabilities
-# FIX: Simplified step. We simply apply caps. No apt-get remove/autoremove risk.
 RUN setcap 'cap_net_admin,cap_net_bind_service+ep' /usr/bin/gpservice && \
     ldconfig
 
@@ -80,6 +77,8 @@ RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \
     chown -R gpuser:gpuser /var/www/html /tmp/gp-logs /run/dbus
 
 COPY server.py index.html /var/www/html/
+COPY assets/gp-proxy /var/www/html/assets/gp-proxy/
+
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
