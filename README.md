@@ -1,3 +1,5 @@
+<!-- File: README.md -->
+
 # GP Proxy & Client
 
 A Dockerized VPN client that provides a **SOCKS5 proxy** and a **Transparent Gateway** for GP-compatible VPNs. It features a modern Web UI, SSO (SAML) authentication support, and a cross-platform desktop companion app (`gp-client-proxy`) to manage connections seamlessly.

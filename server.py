@@ -355,12 +355,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_header("Content-Disposition", "attachment; filename=vpn_full_debug.log")
                 self.end_headers()
 
-                self.wfile.write(b"=== SERVICE LOG (Wrapper/UI) ===\n\n")
+                self.wfile.write(b"=== SERVICE LOG ===\n\n")
                 if SERVICE_LOG.exists():
                     with open(SERVICE_LOG, "rb") as f:
                         shutil.copyfileobj(f, self.wfile)
 
-                self.wfile.write(b"\n\n=== CLIENT LOG (GlobalProtect) ===\n\n")
+                self.wfile.write(b"\n\n=== CLIENT LOG ===\n\n")
                 if CLIENT_LOG.exists():
                     with open(CLIENT_LOG, "rb") as f:
                         shutil.copyfileobj(f, self.wfile)

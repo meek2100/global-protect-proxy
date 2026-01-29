@@ -1,10 +1,10 @@
-<!-- File: agents.md -->
+<!-- File: AGENTS.md -->
 
-# Agent Context: GlobalProtect Proxy
+# Agent Context: GP Proxy & Client
 
 ## Project Overview
 
-This project encapsulates a GlobalProtect VPN client inside a Docker container, exposing it via a SOCKS5 proxy (`microsocks`) on port 1080. It uses a custom Python-based web UI on port 8001 to handle the authentication flow.
+This project encapsulates a GP Proxy VPN client inside a Docker container, exposing it via a SOCKS5 proxy (`microsocks`) on port 1080. It uses a custom Python-based web UI on port 8001 to handle the authentication flow.
 
 ## Development Standards (Crucial)
 
@@ -48,7 +48,7 @@ The `entrypoint.sh` includes a robust parser that handles case sensitivity and q
 
 | Variable        | Default      | Description                                                                      |
 | :-------------- | :----------- | :------------------------------------------------------------------------------- |
-| `VPN_PORTAL`    | **Required** | The URL of your GlobalProtect portal.                                            |
+| `VPN_PORTAL`    | **Required** | The URL of your GP Proxy portal.                                                 |
 | `VPN_MODE`      | `standard`   | `standard` (SOCKS + NAT), `socks` (SOCKS only), `gateway` (NAT only).            |
 | `LOG_LEVEL`     | `INFO`       | `TRACE` (-vv), `DEBUG` (-v + status logs), `INFO` (Quiet).                       |
 | `GP_ARGS`       | `(Empty)`    | Additional arguments passed directly to `gpclient`.                              |

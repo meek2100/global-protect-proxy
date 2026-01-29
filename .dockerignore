@@ -1,3 +1,4 @@
+# File: .dockerignore
 # Git
 .git
 .gitignore
@@ -30,7 +31,6 @@ Cargo.lock
 # Logs & Temp
 *.log
 vpn_full_debug.log
-globalprotect-vpn_logs.txt
 npm-debug.log*
 
 # Docker
