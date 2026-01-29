@@ -46,7 +46,8 @@ fn main() -> Result<()> {
 }
 
 fn handle_link(url: &str) -> Result<()> {
-    let proxy_base = load_config().context("Configuration missing. Please run the tool manually to setup.")?;
+    let proxy_base =
+        load_config().context("Configuration missing. Please run the tool manually to setup.")?;
     let target_endpoint = format!("{}/submit", proxy_base.trim_end_matches('/'));
     forward_to_container(&target_endpoint, url)?;
     Ok(())
@@ -112,7 +113,10 @@ fn interactive_setup() -> Result<()> {
     // 4. Prompt for URL
     println!("");
     if !discovered_url.is_empty() {
-        println!("Press Enter to use [{}], or type a new URL.", discovered_url);
+        println!(
+            "Press Enter to use [{}], or type a new URL.",
+            discovered_url
+        );
     } else {
         println!("Please enter the URL of your GP Proxy.");
         println!("Example: http://192.168.1.155:8001");
@@ -193,7 +197,10 @@ fn try_discover() -> Result<String> {
     socket.set_read_timeout(Some(Duration::from_millis(1500)))?;
 
     // Send Broadcast
-    socket.send_to(DISCOVERY_MSG.as_bytes(), format!("255.255.255.255:{}", UDP_PORT))?;
+    socket.send_to(
+        DISCOVERY_MSG.as_bytes(),
+        format!("255.255.255.255:{}", UDP_PORT),
+    )?;
 
     // Listen for Reply
     let mut buf = [0; 1024];
@@ -217,7 +224,8 @@ fn try_discover() -> Result<String> {
 // --- CONFIGURATION MANAGEMENT ---
 
 fn get_config_path() -> Result<PathBuf> {
-    let proj_dirs = ProjectDirs::from("com", "gpproxy", "linkhandler").context("Could not determine config directory")?;
+    let proj_dirs = ProjectDirs::from("com", "gpproxy", "linkhandler")
+        .context("Could not determine config directory")?;
     let config_dir = proj_dirs.config_dir();
     if !config_dir.exists() {
         fs::create_dir_all(config_dir)?;
@@ -280,7 +288,9 @@ fn install_handler() -> Result<()> {
     let exe_path_str = exe_path.to_str().unwrap();
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let path = std::path::Path::new("Software").join("Classes").join(PROTOCOL_SCHEME);
+    let path = std::path::Path::new("Software")
+        .join("Classes")
+        .join(PROTOCOL_SCHEME);
 
     let (key, _) = hkcu.create_subkey(&path)?;
     key.set_value("", &format!("URL:{} Protocol", APP_NAME))?;
@@ -300,10 +310,13 @@ fn uninstall_handler() -> Result<()> {
     use winreg::RegKey;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let path = std::path::Path::new("Software").join("Classes").join(PROTOCOL_SCHEME);
+    let path = std::path::Path::new("Software")
+        .join("Classes")
+        .join(PROTOCOL_SCHEME);
 
     // delete_subkey_all is recursive
-    hkcu.delete_subkey_all(&path).context("Failed to delete Registry key")?;
+    hkcu.delete_subkey_all(&path)
+        .context("Failed to delete Registry key")?;
     Ok(())
 }
 
@@ -356,7 +369,9 @@ fn uninstall_handler() -> Result<()> {
         fs::remove_file(&file_path)?;
     }
 
-    let _ = Command::new("update-desktop-database").arg(&apps_dir).status();
+    let _ = Command::new("update-desktop-database")
+        .arg(&apps_dir)
+        .status();
     Ok(())
 }
 
@@ -367,7 +382,9 @@ fn uninstall_handler() -> Result<()> {
 fn install_handler() -> Result<()> {
     let exe_path = env::current_exe()?;
     let dirs = directories::UserDirs::new().context("No home dir")?;
-    let app_path = dirs.home_dir().join(format!("Applications/{}.app", APP_NAME));
+    let app_path = dirs
+        .home_dir()
+        .join(format!("Applications/{}.app", APP_NAME));
 
     let macos_dir = app_path.join("Contents/MacOS");
     fs::create_dir_all(&macos_dir)?;
@@ -420,7 +437,9 @@ fn install_handler() -> Result<()> {
 #[cfg(target_os = "macos")]
 fn uninstall_handler() -> Result<()> {
     let dirs = directories::UserDirs::new().context("No home dir")?;
-    let app_path = dirs.home_dir().join(format!("Applications/{}.app", APP_NAME));
+    let app_path = dirs
+        .home_dir()
+        .join(format!("Applications/{}.app", APP_NAME));
 
     if app_path.exists() {
         fs::remove_dir_all(&app_path)?;
