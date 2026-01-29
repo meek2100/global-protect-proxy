@@ -74,7 +74,7 @@ fn interactive_setup() -> Result<()> {
     if let Ok(current) = load_config() {
         println!("Status: Configured");
         println!("Target: {}", current);
-        println!("");
+        println!(); // FIX: Removed empty string literal
         println!("Options:");
         println!("  [1] Re-configure");
         println!("  [2] Uninstall / Remove");
@@ -95,7 +95,7 @@ fn interactive_setup() -> Result<()> {
     }
 
     // 3. AUTO-DISCOVERY
-    println!("");
+    println!(); // FIX: Removed empty string literal
     println!("Scanning network for GP Proxy...");
 
     let mut discovered_url = String::new();
@@ -111,7 +111,7 @@ fn interactive_setup() -> Result<()> {
     }
 
     // 4. Prompt for URL
-    println!("");
+    println!(); // FIX: Removed empty string literal
     if !discovered_url.is_empty() {
         println!(
             "Press Enter to use [{}], or type a new URL.",
@@ -142,7 +142,7 @@ fn interactive_setup() -> Result<()> {
     }
 
     // 5. Save & Install
-    println!("");
+    println!(); // FIX: Removed empty string literal
     println!("Saving configuration...");
     save_config(&final_url)?;
 
@@ -155,13 +155,13 @@ fn interactive_setup() -> Result<()> {
         println!("You can now click 'SSO Login' links in your browser.");
     }
 
-    println!("");
+    println!(); // FIX: Removed empty string literal
     wait_for_enter();
     Ok(())
 }
 
 fn uninstall_process() -> Result<()> {
-    println!("");
+    println!(); // FIX: Removed empty string literal
     println!("Removing {}...", APP_NAME);
 
     // 1. Remove OS Integration
@@ -176,7 +176,7 @@ fn uninstall_process() -> Result<()> {
         Err(e) => println!(" - Warning: Config cleanup failed: {}", e),
     }
 
-    println!("");
+    println!(); // FIX: Removed empty string literal
     println!("Uninstallation Complete.");
     println!("You may now delete this executable file.");
     wait_for_enter();
@@ -349,7 +349,8 @@ fn install_handler() -> Result<()> {
     fs::write(&file_path, desktop_file_content)?;
 
     Command::new("xdg-mime")
-        .args(&[
+        .args([
+            // FIX: Removed & before array to satisfy needless_borrows
             "default",
             format!("{}.desktop", BINARY_NAME).as_str(),
             &format!("x-scheme-handler/{}", PROTOCOL_SCHEME),
