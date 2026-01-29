@@ -1,6 +1,18 @@
 # File: apps/vpn-link-handler/Cargo.toml
+[package]
+name = "vpn-link-handler"
+version = "0.1.0"
+edition = "2021"
+
+# Optimization: Optimize for size in release builds
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+
 [dependencies]
-ureq = "2.9"        # Tiny, blocking HTTP client (minimal dependencies)
+ureq = "2.9"        # Tiny, blocking HTTP client
 anyhow = "1.0"      # Error handling
 directories = "5.0" # Cross-platform path handling
 env_logger = "0.10"
