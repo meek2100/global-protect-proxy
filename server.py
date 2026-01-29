@@ -285,7 +285,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     # FIX: Added noqa: A002 to suppress Ruff shadowing warning
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         """Redirect default HTTP logs to the unified logger."""
-        logger.info("%s - - %s", self.client_address[0], format % args)
+        # OPTIMIZATION: Log status polling at DEBUG level to prevent log flooding
+        if "status.json" in args[0]:
+            logger.debug("%s - - %s", self.client_address[0], format % args)
+        else:
+            logger.info("%s - - %s", self.client_address[0], format % args)
 
     def do_GET(self) -> None:
         """Handle GET requests."""
