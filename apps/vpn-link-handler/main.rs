@@ -1,3 +1,4 @@
+// File: apps/vpn-link-handler/main.rs
 use anyhow::{Context, Result};
 use std::env;
 use std::fs;

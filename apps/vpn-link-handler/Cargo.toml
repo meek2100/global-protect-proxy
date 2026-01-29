@@ -1,4 +1,4 @@
-# File: apps/gp-helper/Cargo.toml
+# File: apps/vpn-link-handler/Cargo.toml
 [dependencies]
 ureq = "2.9"        # Tiny, blocking HTTP client (minimal dependencies)
 anyhow = "1.0"      # Error handling
