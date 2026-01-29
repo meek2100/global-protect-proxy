@@ -4,6 +4,11 @@ name = "vpn-link-handler"
 version = "0.1.0"
 edition = "2021"
 
+# FIX: Explicitly point to main.rs since it is not in the default 'src/' folder
+[[bin]]
+name = "vpn-link-handler"
+path = "main.rs"
+
 # Optimization: Optimize for size in release builds
 [profile.release]
 strip = true
