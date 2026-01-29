@@ -24,11 +24,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "apps/vpn-link-handler -> target"
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.14"
-          # Cache pip based on pyproject.toml hash
           cache: "pip"
           cache-dependency-path: pyproject.toml
 
