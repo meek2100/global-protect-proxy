@@ -55,7 +55,8 @@ jobs:
         run: |
           # Rename the binary to be descriptive (e.g., vpn-link-handler-windows.exe)
           cd apps/vpn-link-handler/target/${{ matrix.target }}/release
-          mv ${{ matrix.binary-name }} ../../../../${{ matrix.asset-name }}
+          # FIX: Use ../../../ (3 levels) to land in apps/vpn-link-handler/
+          mv ${{ matrix.binary-name }} ../../../${{ matrix.asset-name }}
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
