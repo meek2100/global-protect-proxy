@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This project encapsulates a GlobalProtect VPN client inside a Docker container, exposing it via a SOCKS5 proxy (`microsocks`) on port 1080 and a Transparent Gateway. It utilizes a "Split-Agent" architecture where a secure Container Agent handles the networking/VPN and a Host Agent (Desktop App) handles the SSO authentication flow and management.
+This project encapsulates a GP-compatible VPN client inside a Docker container, exposing it via a SOCKS5 proxy (`microsocks`) on port 1080 and a Transparent Gateway. It utilizes a "Split-Agent" architecture where a secure **Container Agent** handles the networking/VPN and a **Host Agent** (Desktop App) handles the SSO authentication flow and management.
 
 ## Development Standards (Crucial)
 
@@ -47,6 +47,7 @@ This is a cross-platform binary (`gp-client-proxy`) that operates in two modes:
     - **Auto-Discovery:** Broadcasts `GP_DISCOVER` on UDP 32800 to find the container IP automatically.
     - **Management:** Displays real-time status (polled from `status.json`) and allows Connect/Disconnect actions.
     - **Browser Launch:** Automatically opens the system default browser to the Auth URL when required.
+    - **Connection Info:** Displays the calculated Gateway IP and SOCKS port when connected.
 2.  **Handler Mode (Background):**
     - Triggered by the OS when a `globalprotect://` link is clicked.
     - Captures the callback URL.
@@ -77,7 +78,7 @@ This is a cross-platform binary (`gp-client-proxy`) that operates in two modes:
 ### Host (Client)
 
 - **`apps/gp-client-proxy/src/main.rs`:** The Rust source code.
-    - Uses `ureq` (3.x) for HTTP requests.
+    - Uses `ureq` (3.x) for HTTP requests (`send_empty`, `read_json`).
     - Uses `serde` for JSON parsing.
     - Uses `webbrowser` to launch the auth page.
     - Implements the "Manager" TUI (Text User Interface).
