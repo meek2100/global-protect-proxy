@@ -26,14 +26,19 @@ const UDP_PORT: u16 = 32800;
 const DISCOVERY_MSG: &str = "GP_DISCOVER";
 const PROTOCOL_SCHEME: &str = "globalprotect";
 const APP_NAME: &str = "GP Client Proxy";
-const BINARY_NAME: &str = "gp-client-proxy";
 const CONFIG_FILE_NAME: &str = "proxy_url.txt";
+
+// FIX: Only define BINARY_NAME on non-Windows platforms to avoid "unused const" warnings
+#[cfg(not(target_os = "windows"))]
+const BINARY_NAME: &str = "gp-client-proxy";
 
 // --- DATA STRUCTURES ---
 #[derive(Deserialize, Debug)]
 struct ServerStatus {
-    state: String,     // idle, connecting, auth, connected, error
-    vpn_mode: String,  // standard, gateway, socks
+    state: String,    // idle, connecting, auth, connected, error
+    vpn_mode: String, // standard, gateway, socks
+    // FIX: Allow dead code for fields we parse but don't actively read yet
+    #[allow(dead_code)]
     url: Option<String>,
     error: Option<String>,
 }
@@ -91,7 +96,7 @@ fn run_dashboard() -> Result<()> {
                 println!("STATUS:    {}", s.state.to_uppercase());
                 println!("MODE:      {}", s.vpn_mode.to_uppercase());
 
-                // --- NEW: Connection Info Block ---
+                // --- Connection Info Block ---
                 if s.state == "connected" {
                     println!("\n[!] CONNECTION DETAILS");
 
@@ -145,23 +150,23 @@ fn run_dashboard() -> Result<()> {
 
         match input.trim() {
             "1" => {
-                 let _ = webbrowser::open(&config_url);
+                let _ = webbrowser::open(&config_url);
             }
             "2" => {
                 if let Ok(s) = &status {
-                     if s.state == "connected" {
-                         // DISCONNECT ACTION
-                         println!("Disconnecting...");
-                         let _ = ureq::post(&format!("{}/disconnect", config_url)).call();
-                         thread::sleep(Duration::from_secs(1));
-                     } else {
-                         // CONNECT ACTION
-                         println!("Initiating Connection...");
-                         let _ = ureq::post(&format!("{}/connect", config_url)).call();
-                         println!("Launching Browser for Auth...");
-                         let _ = webbrowser::open(&config_url);
-                         poll_for_success(&config_url);
-                     }
+                    if s.state == "connected" {
+                        // DISCONNECT ACTION
+                        println!("Disconnecting...");
+                        let _ = ureq::post(&format!("{}/disconnect", config_url)).call();
+                        thread::sleep(Duration::from_secs(1));
+                    } else {
+                        // CONNECT ACTION
+                        println!("Initiating Connection...");
+                        let _ = ureq::post(&format!("{}/connect", config_url)).call();
+                        println!("Launching Browser for Auth...");
+                        let _ = webbrowser::open(&config_url);
+                        poll_for_success(&config_url);
+                    }
                 }
             }
             "3" => {
@@ -244,7 +249,14 @@ fn run_setup_wizard() -> Result<()> {
     }
 
     // 2. Confirm / Manual Entry
-    println!("\nPress [Enter] to use: {}", if found_url.is_empty() { "Manual Entry" } else { &found_url });
+    println!(
+        "\nPress [Enter] to use: {}",
+        if found_url.is_empty() {
+            "Manual Entry"
+        } else {
+            &found_url
+        }
+    );
     if !found_url.is_empty() {
         println!("Or type a new IP (e.g., 192.168.1.50)");
     } else {
@@ -257,6 +269,7 @@ fn run_setup_wizard() -> Result<()> {
     io::stdin().read_line(&mut input)?;
     let input = input.trim();
 
+    // FIX: Collapsed else-if block
     let final_url = if input.is_empty() {
         if found_url.is_empty() {
             println!("Error: IP required.");
@@ -264,12 +277,10 @@ fn run_setup_wizard() -> Result<()> {
             return Ok(());
         }
         found_url
+    } else if input.contains("://") {
+        input.to_string()
     } else {
-        if input.contains("://") {
-            input.to_string()
-        } else {
-            format!("http://{}:8001", input)
-        }
+        format!("http://{}:8001", input)
     };
 
     // 3. Save
@@ -325,7 +336,10 @@ fn try_discover() -> Result<String> {
     socket.set_broadcast(true)?;
     socket.set_read_timeout(Some(Duration::from_millis(1500)))?;
 
-    socket.send_to(DISCOVERY_MSG.as_bytes(), format!("255.255.255.255:{}", UDP_PORT))?;
+    socket.send_to(
+        DISCOVERY_MSG.as_bytes(),
+        format!("255.255.255.255:{}", UDP_PORT),
+    )?;
 
     let mut buf = [0; 1024];
     let (amt, _src) = socket.recv_from(&mut buf)?;
@@ -342,15 +356,18 @@ fn try_discover() -> Result<String> {
 
 // --- CONFIG ---
 fn get_config_path() -> Result<PathBuf> {
-    let proj_dirs = ProjectDirs::from("com", "gpproxy", "client")
-        .context("No config dir")?;
+    let proj_dirs = ProjectDirs::from("com", "gpproxy", "client").context("No config dir")?;
     let config_dir = proj_dirs.config_dir();
-    if !config_dir.exists() { fs::create_dir_all(config_dir)?; }
+    if !config_dir.exists() {
+        fs::create_dir_all(config_dir)?;
+    }
     Ok(config_dir.join(CONFIG_FILE_NAME))
 }
 fn load_config() -> Result<String> {
     let path = get_config_path()?;
-    if !path.exists() { anyhow::bail!("No config"); }
+    if !path.exists() {
+        anyhow::bail!("No config");
+    }
     Ok(fs::read_to_string(path)?.trim().to_string())
 }
 fn save_config(url: &str) -> Result<()> {
@@ -359,7 +376,9 @@ fn save_config(url: &str) -> Result<()> {
 }
 fn remove_config() -> Result<()> {
     let path = get_config_path()?;
-    if path.exists() { fs::remove_file(path)?; }
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
     Ok(())
 }
 
@@ -381,7 +400,9 @@ fn install_handler() -> Result<()> {
     let exe_path = env::current_exe()?;
     let exe_path_str = exe_path.to_str().unwrap();
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let path = std::path::Path::new("Software").join("Classes").join(PROTOCOL_SCHEME);
+    let path = std::path::Path::new("Software")
+        .join("Classes")
+        .join(PROTOCOL_SCHEME);
     let (key, _) = hkcu.create_subkey(&path)?;
     key.set_value("", &format!("URL:{} Protocol", APP_NAME))?;
     key.set_value("URL Protocol", &"")?;
@@ -396,8 +417,11 @@ fn uninstall_handler() -> Result<()> {
     use winreg::enums::*;
     use winreg::RegKey;
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let path = std::path::Path::new("Software").join("Classes").join(PROTOCOL_SCHEME);
-    hkcu.delete_subkey_all(&path).context("Failed to delete Registry key")?;
+    let path = std::path::Path::new("Software")
+        .join("Classes")
+        .join(PROTOCOL_SCHEME);
+    hkcu.delete_subkey_all(&path)
+        .context("Failed to delete Registry key")?;
     Ok(())
 }
 
@@ -408,7 +432,9 @@ fn install_handler() -> Result<()> {
 
     // Icon
     let icon_dir = dirs.data_local_dir().join("icons/hicolor/512x512/apps");
-    if !icon_dir.exists() { fs::create_dir_all(&icon_dir)?; }
+    if !icon_dir.exists() {
+        fs::create_dir_all(&icon_dir)?;
+    }
     fs::write(icon_dir.join("gp-client-proxy.png"), ICON_PNG)?;
 
     // Desktop Entry
@@ -417,10 +443,21 @@ fn install_handler() -> Result<()> {
         APP_NAME, exe_path.to_string_lossy(), PROTOCOL_SCHEME
     );
     let apps_dir = dirs.data_local_dir().join("applications");
-    if !apps_dir.exists() { fs::create_dir_all(&apps_dir)?; }
-    fs::write(apps_dir.join(format!("{}.desktop", BINARY_NAME)), desktop_file)?;
+    if !apps_dir.exists() {
+        fs::create_dir_all(&apps_dir)?;
+    }
+    fs::write(
+        apps_dir.join(format!("{}.desktop", BINARY_NAME)),
+        desktop_file,
+    )?;
 
-    Command::new("xdg-mime").args(["default", &format!("{}.desktop", BINARY_NAME), &format!("x-scheme-handler/{}", PROTOCOL_SCHEME)]).status()?;
+    Command::new("xdg-mime")
+        .args([
+            "default",
+            &format!("{}.desktop", BINARY_NAME),
+            &format!("x-scheme-handler/{}", PROTOCOL_SCHEME),
+        ])
+        .status()?;
     Ok(())
 }
 
@@ -429,8 +466,12 @@ fn uninstall_handler() -> Result<()> {
     let dirs = directories::BaseDirs::new().context("No home dir")?;
     let apps_dir = dirs.data_local_dir().join("applications");
     let file = apps_dir.join(format!("{}.desktop", BINARY_NAME));
-    if file.exists() { fs::remove_file(file)?; }
-    let _ = Command::new("update-desktop-database").arg(&apps_dir).status();
+    if file.exists() {
+        fs::remove_file(file)?;
+    }
+    let _ = Command::new("update-desktop-database")
+        .arg(&apps_dir)
+        .status();
     Ok(())
 }
 
@@ -438,7 +479,9 @@ fn uninstall_handler() -> Result<()> {
 fn install_handler() -> Result<()> {
     let exe_path = env::current_exe()?;
     let dirs = directories::UserDirs::new().context("No home dir")?;
-    let app_path = dirs.home_dir().join(format!("Applications/{}.app", APP_NAME));
+    let app_path = dirs
+        .home_dir()
+        .join(format!("Applications/{}.app", APP_NAME));
     let contents = app_path.join("Contents");
     let macos = contents.join("MacOS");
     let res = contents.join("Resources");
@@ -447,7 +490,8 @@ fn install_handler() -> Result<()> {
     fs::copy(&exe_path, macos.join(BINARY_NAME))?;
     fs::write(res.join("AppIcon.icns"), ICON_ICNS)?;
 
-    let plist = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+    let plist = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>{}</string>
@@ -456,18 +500,36 @@ fn install_handler() -> Result<()> {
 <key>CFBundleDisplayName</key><string>{}</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>VPN Login Link</string><key>CFBundleURLSchemes</key><array><string>globalprotect</string></array></dict></array>
-</dict></plist>"#, BINARY_NAME, APP_NAME, APP_NAME);
+</dict></plist>"#,
+        BINARY_NAME, APP_NAME, APP_NAME
+    );
 
     fs::write(contents.join("Info.plist"), plist)?;
-    Command::new("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister").arg("-f").arg(&app_path).status().ok();
+    Command::new(
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+    )
+    .arg("-f")
+    .arg(&app_path)
+    .status()
+    .ok();
     Ok(())
 }
 
 #[cfg(target_os = "macos")]
 fn uninstall_handler() -> Result<()> {
     let dirs = directories::UserDirs::new().context("No home dir")?;
-    let app_path = dirs.home_dir().join(format!("Applications/{}.app", APP_NAME));
-    if app_path.exists() { fs::remove_dir_all(&app_path)?; }
-    Command::new("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister").arg("-f").arg(&app_path).status().ok();
+    let app_path = dirs
+        .home_dir()
+        .join(format!("Applications/{}.app", APP_NAME));
+    if app_path.exists() {
+        fs::remove_dir_all(&app_path)?;
+    }
+    Command::new(
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+    )
+    .arg("-f")
+    .arg(&app_path)
+    .status()
+    .ok();
     Ok(())
 }
