@@ -1,3 +1,5 @@
+<!-- File: AGENTS.md -->
+
 # Agent Context: GP Proxy & Client
 
 ## Project Overview
