@@ -5,25 +5,154 @@ set -e
 # --- FIX: Ensure administrative commands (ip, iptables) are in PATH ---
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
-# --- CONFIGURATION ---
+# ==============================================================================
+# 1. ROBUST CONFIGURATION PARSING
+# ==============================================================================
+
+# Helper: Find env var value case-insensitively
+get_env_value() {
+    local val=""
+    for key in "$@"; do
+        if [ -n "${!key}" ]; then
+            val="${!key}"
+            break
+        fi
+        local match_line
+        match_line=$(env | grep -i "^${key}=" | head -n 1)
+        if [ -n "$match_line" ]; then
+            val="${match_line#*=}"
+            break
+        fi
+    done
+    echo "$val"
+}
+
+# Helper: Strip quotes and trim whitespace
+clean_val() {
+    local val="$1"
+    val="${val%\"}"
+    val="${val#\"}"
+    val="${val%\'}"
+    val="${val#\'}"
+    echo "$val" | xargs
+}
+
+# --- Resolve & Normalize Variables ---
+
+# 1. LOG_LEVEL
+RAW_LOG_LEVEL=$(get_env_value "LOG_LEVEL" "log_level")
+CLEAN_LOG_LEVEL=$(clean_val "$RAW_LOG_LEVEL")
+LOG_LEVEL="${CLEAN_LOG_LEVEL^^}"
+[ -z "$LOG_LEVEL" ] && LOG_LEVEL="INFO"
+export LOG_LEVEL
+
+# 2. VPN_MODE
+RAW_VPN_MODE=$(get_env_value "VPN_MODE" "vpn_mode")
+CLEAN_VPN_MODE=$(clean_val "$RAW_VPN_MODE")
+VPN_MODE="${CLEAN_VPN_MODE,,}"
+[ -z "$VPN_MODE" ] && VPN_MODE="standard"
+export VPN_MODE
+
+# 3. VPN_PORTAL (Required)
+RAW_VPN_PORTAL=$(get_env_value "VPN_PORTAL" "vpn_portal")
+VPN_PORTAL=$(clean_val "$RAW_VPN_PORTAL")
+export VPN_PORTAL
+
+# 4. VPN_GATEWAY (Optional)
+RAW_VPN_GATEWAY=$(get_env_value "VPN_GATEWAY" "vpn_gateway" "gateway")
+VPN_GATEWAY=$(clean_val "$RAW_VPN_GATEWAY")
+export VPN_GATEWAY
+
+# 5. DNS_SERVERS
+RAW_DNS=$(get_env_value "DNS_SERVERS" "dns_servers" "VPN_DNS" "vpn_dns")
+CLEAN_DNS=$(clean_val "$RAW_DNS")
+DNS_SERVERS=$(echo "$CLEAN_DNS" | tr ',' ' ' | xargs)
+export DNS_SERVERS
+
+# 6. GP_ARGS (Custom)
+RAW_GP_ARGS=$(get_env_value "GP_ARGS" "gp_args")
+GP_ARGS=$(clean_val "$RAW_GP_ARGS")
+export GP_ARGS
+
+# 7. TIMEZONE
+RAW_TZ=$(get_env_value "TZ" "tz" "timezone")
+CLEAN_TZ=$(clean_val "$RAW_TZ")
+TZ="${CLEAN_TZ:-UTC}"
+export TZ
+
+# 8. PUID/PGID
+RAW_PUID=$(get_env_value "PUID" "puid")
+PUID=$(clean_val "$RAW_PUID")
+export PUID
+
+RAW_PGID=$(get_env_value "PGID" "pgid")
+PGID=$(clean_val "$RAW_PGID")
+export PGID
+
+# --- NEW: Advanced GP Options ---
+
+# 9. HIP Report (--hip)
+RAW_HIP=$(get_env_value "VPN_HIP_REPORT" "hip_report" "HIP")
+CLEAN_HIP=$(clean_val "$RAW_HIP")
+if [[ "${CLEAN_HIP,,}" == "true" || "${CLEAN_HIP}" == "1" ]]; then
+    VPN_HIP_REPORT="true"
+else
+    VPN_HIP_REPORT="false"
+fi
+export VPN_HIP_REPORT
+
+# 10. Client OS (--os)
+RAW_OS=$(get_env_value "VPN_OS" "os")
+VPN_OS=$(clean_val "$RAW_OS")
+export VPN_OS
+
+# 11. Client OS Version (--os-version)
+RAW_OS_VER=$(get_env_value "VPN_OS_VERSION" "os_version")
+VPN_OS_VERSION=$(clean_val "$RAW_OS_VER")
+export VPN_OS_VERSION
+
+# 12. Client Version (--client-version)
+RAW_CLIENT_VER=$(get_env_value "VPN_CLIENT_VERSION" "client_version")
+VPN_CLIENT_VERSION=$(clean_val "$RAW_CLIENT_VER")
+export VPN_CLIENT_VERSION
+
+# 13. No DTLS (--no-dtls)
+RAW_DTLS=$(get_env_value "VPN_NO_DTLS" "no_dtls")
+CLEAN_DTLS=$(clean_val "$RAW_DTLS")
+if [[ "${CLEAN_DTLS,,}" == "true" || "${CLEAN_DTLS}" == "1" ]]; then
+    VPN_NO_DTLS="true"
+else
+    VPN_NO_DTLS="false"
+fi
+export VPN_NO_DTLS
+
+# 14. Disable IPv6 (--disable-ipv6)
+RAW_IPV6=$(get_env_value "VPN_DISABLE_IPV6" "disable_ipv6")
+CLEAN_IPV6=$(clean_val "$RAW_IPV6")
+if [[ "${CLEAN_IPV6,,}" == "true" || "${CLEAN_IPV6}" == "1" ]]; then
+    VPN_DISABLE_IPV6="true"
+else
+    VPN_DISABLE_IPV6="false"
+fi
+export VPN_DISABLE_IPV6
+
+# ==============================================================================
+# 2. RUNTIME SETUP
+# ==============================================================================
+
 CLIENT_LOG="/tmp/gp-logs/gp-client.log"
 SERVICE_LOG="/tmp/gp-logs/gp-service.log"
 MODE_FILE="/tmp/gp-mode"
 PIPE_STDIN="/tmp/gp-stdin"
 PIPE_CONTROL="/tmp/gp-control"
 
-# Defaults
-: "${TZ:=UTC}"
-: "${LOG_LEVEL:=INFO}"
-: "${VPN_MODE:=standard}"
-: "${DNS_SERVERS:=}"
-: "${GP_ARGS:=}"
-
-# Disable ANSI colors in Rust binaries (Fixes log artifacting)
+# Disable ANSI colors in Rust binaries
 export RUST_LOG_STYLE=never
 
 # Apply Timezone
-ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" >/etc/timezone
+if [ -f "/usr/share/zoneinfo/$TZ" ]; then
+    ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" >/etc/timezone
+fi
 
 # --- LOGGING HELPER ---
 log() {
@@ -45,37 +174,72 @@ log() {
     fi
 }
 
+# --- VERBOSITY MAPPING ---
+GP_VERBOSITY=""
+if [ "$LOG_LEVEL" == "DEBUG" ]; then
+    GP_VERBOSITY="-v"
+elif [ "$LOG_LEVEL" == "TRACE" ]; then
+    GP_VERBOSITY="-vv"
+fi
+
+# --- STARTUP SUMMARY ---
+log "INFO" "=========================================="
+log "INFO" "          GP Proxy Startup               "
+log "INFO" "=========================================="
+log "INFO" "Mode:        $VPN_MODE"
+log "INFO" "Log Level:   $LOG_LEVEL"
+log "INFO" "Verbosity:   ${GP_VERBOSITY:-None}"
+log "INFO" "Portal:      ${VPN_PORTAL:-[Not Set]}"
+if [ -n "$VPN_GATEWAY" ]; then
+    log "INFO" "Gateway:     $VPN_GATEWAY"
+fi
+if [ -n "$DNS_SERVERS" ]; then
+    log "INFO" "Custom DNS:  $DNS_SERVERS"
+fi
+log "INFO" "------------------------------------------"
+
 # --- GRACEFUL SHUTDOWN ---
 cleanup() {
     log "WARN" "Received Shutdown Signal"
     sudo pkill gpclient || true
+    sudo pkill gpservice || true
     kill "$(jobs -p)" 2>/dev/null || true
     exit 0
 }
 trap cleanup SIGTERM SIGINT
 
+# --- LOG ROTATION ---
+check_log_size() {
+    local max_size=10485760
+    for logfile in "$CLIENT_LOG" "$SERVICE_LOG"; do
+        if [ -f "$logfile" ]; then
+            local size
+            size=$(stat -c%s "$logfile")
+            if [ "$size" -gt "$max_size" ]; then
+                echo "[$(date)] Log truncated due to size limit." >"$logfile"
+            fi
+        fi
+    done
+}
+
 # --- WATCHDOG ---
 check_services() {
-    # 1. Web UI Check
     if ! pgrep -f server.py >/dev/null; then
         log "ERROR" "CRITICAL: Web UI (server.py) died."
         exit 1
     fi
 
-    # 2. GlobalProtect Service Check
-    # FIXED: Use -f to match the full command line.
-    if ! pgrep -f "gpservice" >/dev/null; then
-        log "ERROR" "CRITICAL: gpservice died."
+    local mode
+    mode=$(cat "$MODE_FILE" 2>/dev/null || echo "idle")
 
-        # DEBUG: Dump process list to see what IS running
-        log "ERROR" "--- PROCESS LIST (DEBUG) ---"
-        ps aux >&2
-
-        log "ERROR" "--- DUMPING LOGS (Last 50 lines) ---"
-        # FIX: Write to stderr (>&2) instead of appending to the file we are reading (SC2094)
-        tail -n 50 "$SERVICE_LOG" >&2
-
-        # exit 1  <-- DISABLED FOR DEBUGGING as requested
+    if [ "$mode" == "active" ]; then
+        if ! pgrep -f "gpservice" >/dev/null; then
+            log "ERROR" "CRITICAL: gpservice died while VPN was active."
+            log "ERROR" "--- PROCESS LIST (DEBUG) ---"
+            ps aux >&2
+            log "ERROR" "--- DUMPING LOGS (Last 50 lines) ---"
+            tail -n 50 "$SERVICE_LOG" >&2
+        fi
     fi
 }
 
@@ -138,8 +302,7 @@ fi
 # --- 3. DNS CONFIGURATION ---
 DNS_TO_APPLY=""
 if [ -n "$DNS_SERVERS" ]; then
-    log "INFO" "Custom DNS configuration found: $DNS_SERVERS"
-    DNS_TO_APPLY=$(echo "$DNS_SERVERS" | tr ',' ' ')
+    DNS_TO_APPLY="$DNS_SERVERS"
 elif [ "$IS_MACVLAN" = true ]; then
     log "INFO" "Macvlan detected. Applying fallback defaults."
     DNS_TO_APPLY="8.8.8.8 1.1.1.1"
@@ -185,17 +348,6 @@ chmod 644 "$MODE_FILE"
 log "INFO" "Starting Services..."
 dns_watchdog &
 
-# FIX: Start gpservice via bash pipe to filter out benign error noise.
-# We use grep --line-buffered to ensure real logs appear instantly.
-# This filters:
-# 1. "Failed to start WS server" (Expected in headless mode)
-# 2. "Error: No such file or directory (os error 2)" (Cleanup artifact)
-runuser -u gpuser -- bash -c "
-    /usr/bin/gpservice 2>&1 | \
-    grep --line-buffered -v -E 'Failed to start WS server|Error: No such file or directory \(os error 2\)' \
-    >> \"$SERVICE_LOG\"
-" &
-
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
     runuser -u gpuser -- microsocks -i 0.0.0.0 -p 1080 >/dev/null 2>&1 &
 fi
@@ -205,34 +357,68 @@ runuser -u gpuser -- env VPN_MODE="$VPN_MODE" LOG_LEVEL="$LOG_LEVEL" \
     python3 -u /var/www/html/server.py >>"$SERVICE_LOG" 2>&1 &
 
 # FIX: Stream logs to Docker stdout in background
-# 'tail -F' follows retries if file is recreated
 tail -F "$SERVICE_LOG" "$CLIENT_LOG" &
 
-# Grace period for services to settle before we start checking them
+# Grace period
 sleep 3
 
 # --- 7. MAIN LOOP ---
 while true; do
     check_services
+    check_log_size
 
     if read -r -t 2 _ <"$PIPE_CONTROL"; then
-        log "INFO" "Signal received. Starting gpclient..."
+        log "INFO" "Signal received. Starting Connection Sequence..."
         echo "active" >"$MODE_FILE"
 
+        # 1. Start gpservice (On-Demand)
+        log "INFO" "Starting gpservice..."
         runuser -u gpuser -- bash -c "
-            export VPN_PORTAL=\"$VPN_PORTAL\"
-            export GP_ARGS=\"$GP_ARGS\"
+            /usr/bin/gpservice 2>&1 | \
+            grep --line-buffered -v -E 'Failed to start WS server|Error: No such file or directory \(os error 2\)' \
+            >> \"$SERVICE_LOG\"
+        " &
+
+        sleep 2
+
+        # 2. Start gpclient
+        runuser -u gpuser -- bash -c "
             > \"$CLIENT_LOG\"
             exec 3<> \"$PIPE_STDIN\"
 
-            # Using sudo for gpclient to allow full network access
-            CMD=\"sudo gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
+            # Build Arguments
+            CMD_ARGS=\"$GP_VERBOSITY --fix-openssl connect \\\"$VPN_PORTAL\\\" --browser remote\"
+
+            # Gateway Logic (Prioritize explicit gateway, fallback to portal-as-gateway)
+            if [ -n \"$VPN_GATEWAY\" ]; then
+                CMD_ARGS=\"\$CMD_ARGS --gateway \\\"$VPN_GATEWAY\\\"\"
+            else
+                # Use portal as gateway if no specific gateway provided
+                CMD_ARGS=\"\$CMD_ARGS --as-gateway\"
+            fi
+
+            # Optional Configuration
+            [ \"$VPN_HIP_REPORT\" == \"true\" ]   && CMD_ARGS=\"\$CMD_ARGS --hip\"
+            [ \"$VPN_NO_DTLS\" == \"true\" ]      && CMD_ARGS=\"\$CMD_ARGS --no-dtls\"
+            [ \"$VPN_DISABLE_IPV6\" == \"true\" ] && CMD_ARGS=\"\$CMD_ARGS --disable-ipv6\"
+
+            [ -n \"$VPN_OS\" ]             && CMD_ARGS=\"\$CMD_ARGS --os \\\"$VPN_OS\\\"\"
+            [ -n \"$VPN_OS_VERSION\" ]     && CMD_ARGS=\"\$CMD_ARGS --os-version \\\"$VPN_OS_VERSION\\\"\"
+            [ -n \"$VPN_CLIENT_VERSION\" ] && CMD_ARGS=\"\$CMD_ARGS --client-version \\\"$VPN_CLIENT_VERSION\\\"\"
+
+            # Custom Arguments (override previous)
+            CMD_ARGS=\"\$CMD_ARGS $GP_ARGS\"
+
+            CMD=\"sudo gpclient \$CMD_ARGS\"
 
             echo \"[Entrypoint] Executing: \$CMD\" >> \"$SERVICE_LOG\"
             script -q -c \"\$CMD\" /dev/null <&3 >> \"$CLIENT_LOG\" 2>&1
         "
 
-        log "WARN" "gpclient exited."
+        # 3. Cleanup after disconnect
+        log "WARN" "gpclient exited. Cleaning up services..."
         echo "idle" >"$MODE_FILE"
+        sudo pkill gpservice || true
+        log "INFO" "gpservice stopped. System Idle."
     fi
 done

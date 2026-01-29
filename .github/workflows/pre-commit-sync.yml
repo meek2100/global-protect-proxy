@@ -6,11 +6,7 @@ on:
     types: [opened, synchronize]
     branches: ["dependabot/**"]
     paths:
-      - "Dockerfile"
-      - "entrypoint.sh"
-      - "server.py"
-      - ".pre-commit-config.yaml"
-      - ".github/workflows/*"
+      - "pyproject.toml"
   workflow_dispatch:
 
 permissions:
@@ -34,7 +30,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Install pre-commit
         run: pip install pre-commit
