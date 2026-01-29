@@ -6,16 +6,22 @@ use std::fs;
 use std::io::{self, Write};
 use std::net::UdpSocket;
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::Duration;
+
+// FIX: Only import Command on non-Windows platforms (Windows uses winreg)
+#[cfg(not(target_os = "windows"))]
+use std::process::Command;
 
 // Constants
 const UDP_PORT: u16 = 32800;
 const DISCOVERY_MSG: &str = "GP_DISCOVER";
 const PROTOCOL_SCHEME: &str = "globalprotect";
 const APP_NAME: &str = "VPN Link Handler";
-const BINARY_NAME: &str = "vpn-link-handler";
 const CONFIG_FILE_NAME: &str = "proxy_url.txt";
+
+// FIX: Only define BINARY_NAME on non-Windows platforms
+#[cfg(not(target_os = "windows"))]
+const BINARY_NAME: &str = "vpn-link-handler";
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -74,7 +80,7 @@ fn interactive_setup() -> Result<()> {
     if let Ok(current) = load_config() {
         println!("Status: Configured");
         println!("Target: {}", current);
-        println!(); // FIX: Removed empty string literal
+        println!();
         println!("Options:");
         println!("  [1] Re-configure");
         println!("  [2] Uninstall / Remove");
@@ -95,7 +101,7 @@ fn interactive_setup() -> Result<()> {
     }
 
     // 3. AUTO-DISCOVERY
-    println!(); // FIX: Removed empty string literal
+    println!();
     println!("Scanning network for GP Proxy...");
 
     let mut discovered_url = String::new();
@@ -111,7 +117,7 @@ fn interactive_setup() -> Result<()> {
     }
 
     // 4. Prompt for URL
-    println!(); // FIX: Removed empty string literal
+    println!();
     if !discovered_url.is_empty() {
         println!(
             "Press Enter to use [{}], or type a new URL.",
@@ -142,7 +148,7 @@ fn interactive_setup() -> Result<()> {
     }
 
     // 5. Save & Install
-    println!(); // FIX: Removed empty string literal
+    println!();
     println!("Saving configuration...");
     save_config(&final_url)?;
 
@@ -155,13 +161,13 @@ fn interactive_setup() -> Result<()> {
         println!("You can now click 'SSO Login' links in your browser.");
     }
 
-    println!(); // FIX: Removed empty string literal
+    println!();
     wait_for_enter();
     Ok(())
 }
 
 fn uninstall_process() -> Result<()> {
-    println!(); // FIX: Removed empty string literal
+    println!();
     println!("Removing {}...", APP_NAME);
 
     // 1. Remove OS Integration
@@ -176,7 +182,7 @@ fn uninstall_process() -> Result<()> {
         Err(e) => println!(" - Warning: Config cleanup failed: {}", e),
     }
 
-    println!(); // FIX: Removed empty string literal
+    println!();
     println!("Uninstallation Complete.");
     println!("You may now delete this executable file.");
     wait_for_enter();
@@ -350,7 +356,6 @@ fn install_handler() -> Result<()> {
 
     Command::new("xdg-mime")
         .args([
-            // FIX: Removed & before array to satisfy needless_borrows
             "default",
             format!("{}.desktop", BINARY_NAME).as_str(),
             &format!("x-scheme-handler/{}", PROTOCOL_SCHEME),
