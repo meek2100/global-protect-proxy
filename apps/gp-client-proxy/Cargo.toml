@@ -16,7 +16,7 @@ winres = "0.1"
 [dependencies]
 ureq = { version = "2.9", features = ["json"] }
 anyhow = "1.0"
-directories = "5.0"
+directories = "6.0"
 env_logger = "0.10"
 log = "0.4"
 webbrowser = "1.0"
