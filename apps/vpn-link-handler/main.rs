@@ -12,6 +12,15 @@ use std::time::Duration;
 #[cfg(not(target_os = "windows"))]
 use std::process::Command;
 
+// --- EMBEDDED ASSETS ---
+// These compile the icons directly into the binary so we can write them out during install.
+// Ensure these files exist in 'apps/vpn-link-handler/assets/'
+#[cfg(target_os = "linux")]
+const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
+
+#[cfg(target_os = "macos")]
+const ICON_ICNS: &[u8] = include_bytes!("../assets/AppIcon.icns");
+
 // Constants
 const UDP_PORT: u16 = 32800;
 const DISCOVERY_MSG: &str = "GP_DISCOVER";
@@ -19,7 +28,7 @@ const PROTOCOL_SCHEME: &str = "globalprotect";
 const APP_NAME: &str = "VPN Link Handler";
 const CONFIG_FILE_NAME: &str = "proxy_url.txt";
 
-// FIX: Only define BINARY_NAME on non-Windows platforms
+// FIX: Only define BINARY_NAME on non-Windows platforms to avoid "unused const" warnings
 #[cfg(not(target_os = "windows"))]
 const BINARY_NAME: &str = "vpn-link-handler";
 
@@ -332,11 +341,25 @@ fn uninstall_handler() -> Result<()> {
 #[cfg(target_os = "linux")]
 fn install_handler() -> Result<()> {
     let exe_path = env::current_exe()?;
+
+    // 1. Install Icon
+    let dirs = directories::BaseDirs::new().context("No home dir")?;
+    // Standard path: ~/.local/share/icons/hicolor/512x512/apps/
+    let icon_dir = dirs.data_local_dir().join("icons/hicolor/512x512/apps");
+    if !icon_dir.exists() {
+        fs::create_dir_all(&icon_dir)?;
+    }
+    let icon_path = icon_dir.join("vpn-link-handler.png");
+    fs::write(&icon_path, ICON_PNG)?;
+    println!("Icon installed to: {:?}", icon_path);
+
+    // 2. Create Desktop Entry
     let desktop_file_content = format!(
         "[Desktop Entry]\n\
         Type=Application\n\
         Name={}\n\
         Exec={} %u\n\
+        Icon=vpn-link-handler\n\
         StartupNotify=false\n\
         MimeType=x-scheme-handler/{};\n",
         APP_NAME,
@@ -344,7 +367,6 @@ fn install_handler() -> Result<()> {
         PROTOCOL_SCHEME
     );
 
-    let dirs = directories::BaseDirs::new().context("No home dir")?;
     let apps_dir = dirs.data_local_dir().join("applications");
 
     if !apps_dir.exists() {
@@ -392,12 +414,22 @@ fn install_handler() -> Result<()> {
         .home_dir()
         .join(format!("Applications/{}.app", APP_NAME));
 
-    let macos_dir = app_path.join("Contents/MacOS");
-    fs::create_dir_all(&macos_dir)?;
+    let contents_dir = app_path.join("Contents");
+    let macos_dir = contents_dir.join("MacOS");
+    let resources_dir = contents_dir.join("Resources");
 
+    fs::create_dir_all(&macos_dir)?;
+    fs::create_dir_all(&resources_dir)?;
+
+    // 1. Install Binary
     let dest_exe = macos_dir.join(BINARY_NAME);
     fs::copy(&exe_path, &dest_exe)?;
 
+    // 2. Install Icon
+    let icon_dest = resources_dir.join("AppIcon.icns");
+    fs::write(&icon_dest, ICON_ICNS)?;
+
+    // 3. Info.plist
     let plist = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -411,6 +443,8 @@ fn install_handler() -> Result<()> {
     <string>{}</string>
     <key>CFBundleDisplayName</key>
     <string>{}</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
@@ -427,7 +461,7 @@ fn install_handler() -> Result<()> {
         BINARY_NAME, APP_NAME, APP_NAME
     );
 
-    fs::write(app_path.join("Contents/Info.plist"), plist)?;
+    fs::write(contents_dir.join("Info.plist"), plist)?;
 
     Command::new(
         "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
