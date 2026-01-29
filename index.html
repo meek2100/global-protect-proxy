@@ -663,6 +663,7 @@
             window.vpnState = null;
             let pollInterval = null;
             let lastAuthUrl = ""; // Track URL to detect fresh sessions
+            let isRestarting = false; // LOCK for Restart Process
 
             function setView(viewId) {
                 ["idle", "connecting", "auth", "input", "connected", "error"].forEach((id) => {
@@ -678,26 +679,25 @@
                 txt.innerText = text;
             }
 
-            // --- NEW: Single Click SSO Logic ---
+            // --- NEW: Single Click SSO Logic (Fixed) ---
             function handleSSOClick(btn) {
-                // Visual feedback: link is now "dead"
+                // FIX: Do NOT remove href. CSS 'btn-disabled' prevents re-clicks via pointer-events.
                 btn.classList.add("btn-disabled");
                 btn.innerText = "Link Opened";
-                btn.removeAttribute("href"); // Remove link to prevent re-click
 
                 // Show the inline restart button
                 document.getElementById("btn-restart-auth").classList.remove("hidden");
             }
 
-            // --- NEW: Restart Auth Logic ---
+            // --- NEW: Restart Auth Logic (Fixed for No Flip) ---
             async function restartAuth() {
-                // Trigger a full reset/connect cycle
+                // LOCK UI: Prevent updateStatus from flipping view to 'idle'/'connecting'
+                isRestarting = true;
+
                 setBadge("Generating Link...", "connecting");
-                // We keep the view on 'auth' (or let it flicker to connecting naturally)
-                // but visually we want to show we are doing something.
-                // Disabling the restart button so they don't spam it
-                const restartBtn = document.getElementById("btn-restart-auth");
-                restartBtn.classList.add("hidden");
+
+                // Hide restart button immediately to prevent spam
+                document.getElementById("btn-restart-auth").classList.add("hidden");
 
                 await fetch("/connect", { method: "POST" });
                 resetPoll(1000); // Poll fast for the new link
@@ -734,6 +734,7 @@
                     setBadge("Resetting...", "idle");
                     await fetch("/disconnect", { method: "POST" });
                     window.vpnState = null;
+                    isRestarting = false; // Reset lock
                 }
             }
 
@@ -768,7 +769,21 @@
                         debugSec.style.display = "none";
                     }
 
-                    // 3. STATE TRANSITION
+                    // 3. STATE TRANSITION WITH RESTART LOCK
+                    if (isRestarting) {
+                        // If we are locked in restart mode, ONLY release if we hit error or a NEW Auth URL
+                        if (data.state === "error") {
+                            isRestarting = false;
+                        } else if (data.state === "auth" && data.url && data.url !== lastAuthUrl) {
+                            isRestarting = false;
+                            // Lock released: Fall through to standard update logic below
+                        } else {
+                            // SKIP UI updates while restarting to prevent flipping
+                            resetPoll(1000);
+                            return;
+                        }
+                    }
+
                     if (window.vpnState !== data.state) {
                         setView(data.state);
                         setBadge(data.state.toUpperCase(), data.state);
