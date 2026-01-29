@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+.gitattributes
+.github
+
+# IDEs
+.vscode
+.idea
+*.swp
+*.swo
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.python-version
+.venv
+venv
+env
+*.egg-info
+
+# Rust
+target/
+**/*.rs.bk
+apps/gp-client-proxy/target/
+Cargo.lock
+
+# Logs & Temp
+*.log
+vpn_full_debug.log
+globalprotect-vpn_logs.txt
+npm-debug.log*
+
+# Docker
+docker-compose.override.yml
+.env
