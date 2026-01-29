@@ -5,25 +5,116 @@ set -e
 # --- FIX: Ensure administrative commands (ip, iptables) are in PATH ---
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
-# --- CONFIGURATION ---
+# ==============================================================================
+# 1. ROBUST CONFIGURATION PARSING
+# ==============================================================================
+
+# Helper: Find env var value case-insensitively
+get_env_value() {
+    local val=""
+
+    # FIX SC2124: Iterate over arguments directly instead of assigning $@ to string
+    for key in "$@"; do
+        # 1. Check exact match (Fast)
+        if [ -n "${!key}" ]; then
+            val="${!key}"
+            break
+        fi
+
+        # 2. Check case-insensitive match in environment
+        # Uses grep to find "KEY=" case-insensitively at start of line
+        local match_line
+        match_line=$(env | grep -i "^${key}=" | head -n 1)
+        if [ -n "$match_line" ]; then
+            # Extract value after the first '='
+            val="${match_line#*=}"
+            break
+        fi
+    done
+    echo "$val"
+}
+
+# Helper: Strip quotes and trim whitespace
+clean_val() {
+    local val="$1"
+    # Strip surrounding double quotes
+    val="${val%\"}"
+    val="${val#\"}"
+    # Strip surrounding single quotes
+    val="${val%\'}"
+    val="${val#\'}"
+    # Trim whitespace using xargs
+    echo "$val" | xargs
+}
+
+# --- Resolve & Normalize Variables ---
+
+# 1. LOG_LEVEL (Aliases: log_level)
+# FIX SC2155: Split assignment and export
+RAW_LOG_LEVEL=$(get_env_value "LOG_LEVEL" "log_level")
+CLEAN_LOG_LEVEL=$(clean_val "$RAW_LOG_LEVEL")
+# Default to INFO, normalize to UPPERCASE
+LOG_LEVEL="${CLEAN_LOG_LEVEL^^}"
+[ -z "$LOG_LEVEL" ] && LOG_LEVEL="INFO"
+export LOG_LEVEL
+
+# 2. VPN_MODE (Aliases: vpn_mode)
+RAW_VPN_MODE=$(get_env_value "VPN_MODE" "vpn_mode")
+CLEAN_VPN_MODE=$(clean_val "$RAW_VPN_MODE")
+# Default to standard, normalize to lowercase
+VPN_MODE="${CLEAN_VPN_MODE,,}"
+[ -z "$VPN_MODE" ] && VPN_MODE="standard"
+export VPN_MODE
+
+# 3. VPN_PORTAL (Aliases: vpn_portal)
+RAW_VPN_PORTAL=$(get_env_value "VPN_PORTAL" "vpn_portal")
+VPN_PORTAL=$(clean_val "$RAW_VPN_PORTAL")
+export VPN_PORTAL
+
+# 4. DNS_SERVERS (Aliases: dns_servers, VPN_DNS, vpn_dns)
+RAW_DNS=$(get_env_value "DNS_SERVERS" "dns_servers" "VPN_DNS" "vpn_dns")
+CLEAN_DNS=$(clean_val "$RAW_DNS")
+# Robust DNS parsing: Replace commas with spaces, squash multiple spaces
+DNS_SERVERS=$(echo "$CLEAN_DNS" | tr ',' ' ' | xargs)
+export DNS_SERVERS
+
+# 5. GP_ARGS (Aliases: gp_args)
+RAW_GP_ARGS=$(get_env_value "GP_ARGS" "gp_args")
+GP_ARGS=$(clean_val "$RAW_GP_ARGS")
+export GP_ARGS
+
+# 6. TIMEZONE (Aliases: TZ, tz, timezone)
+RAW_TZ=$(get_env_value "TZ" "tz" "timezone")
+CLEAN_TZ=$(clean_val "$RAW_TZ")
+TZ="${CLEAN_TZ:-UTC}"
+export TZ
+
+# 7. PUID/PGID (Aliases: puid, pgid)
+RAW_PUID=$(get_env_value "PUID" "puid")
+PUID=$(clean_val "$RAW_PUID")
+export PUID
+
+RAW_PGID=$(get_env_value "PGID" "pgid")
+PGID=$(clean_val "$RAW_PGID")
+export PGID
+
+# ==============================================================================
+# 2. RUNTIME SETUP
+# ==============================================================================
+
 CLIENT_LOG="/tmp/gp-logs/gp-client.log"
 SERVICE_LOG="/tmp/gp-logs/gp-service.log"
 MODE_FILE="/tmp/gp-mode"
 PIPE_STDIN="/tmp/gp-stdin"
 PIPE_CONTROL="/tmp/gp-control"
 
-# Defaults
-: "${TZ:=UTC}"
-: "${LOG_LEVEL:=INFO}"
-: "${VPN_MODE:=standard}"
-: "${DNS_SERVERS:=}"
-: "${GP_ARGS:=}"
-
 # Disable ANSI colors in Rust binaries (Fixes log artifacting)
 export RUST_LOG_STYLE=never
 
 # Apply Timezone
-ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" >/etc/timezone
+if [ -f "/usr/share/zoneinfo/$TZ" ]; then
+    ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" >/etc/timezone
+fi
 
 # --- LOGGING HELPER ---
 log() {
@@ -54,7 +145,7 @@ elif [ "$LOG_LEVEL" == "TRACE" ]; then
     GP_VERBOSITY="-vv"
 fi
 
-# --- STARTUP SUMMARY (Requested Improvement) ---
+# --- STARTUP SUMMARY ---
 log "INFO" "=========================================="
 log "INFO" "       GlobalProtect Proxy Startup        "
 log "INFO" "=========================================="
@@ -62,6 +153,9 @@ log "INFO" "Mode:        $VPN_MODE"
 log "INFO" "Log Level:   $LOG_LEVEL"
 log "INFO" "Verbosity:   ${GP_VERBOSITY:-None}"
 log "INFO" "Portal:      ${VPN_PORTAL:-[Not Set]}"
+if [ -n "$DNS_SERVERS" ]; then
+    log "INFO" "Custom DNS:  $DNS_SERVERS"
+fi
 log "INFO" "------------------------------------------"
 
 # --- GRACEFUL SHUTDOWN ---
@@ -175,8 +269,8 @@ fi
 # --- 3. DNS CONFIGURATION ---
 DNS_TO_APPLY=""
 if [ -n "$DNS_SERVERS" ]; then
-    log "INFO" "Custom DNS configuration found: $DNS_SERVERS"
-    DNS_TO_APPLY=$(echo "$DNS_SERVERS" | tr ',' ' ')
+    # Already cleaned and space-separated by the config parser
+    DNS_TO_APPLY="$DNS_SERVERS"
 elif [ "$IS_MACVLAN" = true ]; then
     log "INFO" "Macvlan detected. Applying fallback defaults."
     DNS_TO_APPLY="8.8.8.8 1.1.1.1"
@@ -227,6 +321,7 @@ if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
 fi
 
 # Pass configuration to Server
+# We pass the robustly parsed variables here
 runuser -u gpuser -- env VPN_MODE="$VPN_MODE" LOG_LEVEL="$LOG_LEVEL" \
     python3 -u /var/www/html/server.py >>"$SERVICE_LOG" 2>&1 &
 
