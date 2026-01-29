@@ -1,4 +1,4 @@
-// File: apps/vpn-link-handler/main.rs
+// File: apps/vpn-link-handler/src/main.rs
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use std::env;
@@ -14,7 +14,6 @@ use std::process::Command;
 
 // --- EMBEDDED ASSETS ---
 // These compile the icons directly into the binary so we can write them out during install.
-// Ensure these files exist in 'apps/vpn-link-handler/assets/'
 #[cfg(target_os = "linux")]
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
