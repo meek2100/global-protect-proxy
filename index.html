@@ -694,6 +694,9 @@
                 // LOCK UI: Prevent updateStatus from flipping view to 'idle'/'connecting'
                 isRestarting = true;
 
+                // FORCE UI REFRESH ON RELEASE: Invalidate current state so the next valid update applies visuals
+                window.vpnState = null;
+
                 setBadge("Generating Link...", "connecting");
 
                 // Hide restart button immediately to prevent spam
