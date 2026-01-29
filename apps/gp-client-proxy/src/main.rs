@@ -37,7 +37,6 @@ const BINARY_NAME: &str = "gp-client-proxy";
 struct ServerStatus {
     state: String,    // idle, connecting, auth, connected, error
     vpn_mode: String, // standard, gateway, socks
-    // FIX: Allow dead code for fields we parse but don't actively read yet
     #[allow(dead_code)]
     url: Option<String>,
     error: Option<String>,
@@ -116,7 +115,6 @@ fn run_dashboard() -> Result<()> {
                         println!("DNS Server:    {}", host_ip);
                     }
                 }
-                // ----------------------------------
             }
             Err(_) => {
                 println!("SERVER:    Unreachable ({})", config_url);
@@ -157,12 +155,12 @@ fn run_dashboard() -> Result<()> {
                     if s.state == "connected" {
                         // DISCONNECT ACTION
                         println!("Disconnecting...");
-                        let _ = ureq::post(&format!("{}/disconnect", config_url)).call();
+                        let _ = ureq::post(&format!("{}/disconnect", config_url)).send_empty();
                         thread::sleep(Duration::from_secs(1));
                     } else {
                         // CONNECT ACTION
                         println!("Initiating Connection...");
-                        let _ = ureq::post(&format!("{}/connect", config_url)).call();
+                        let _ = ureq::post(&format!("{}/connect", config_url)).send_empty();
                         println!("Launching Browser for Auth...");
                         let _ = webbrowser::open(&config_url);
                         poll_for_success(&config_url);
@@ -212,7 +210,8 @@ fn poll_for_success(base_url: &str) {
 fn fetch_status(base_url: &str) -> Result<ServerStatus> {
     let resp: ServerStatus = ureq::get(&format!("{}/status.json", base_url))
         .call()?
-        .into_json()?;
+        .body_mut()
+        .read_json()?;
     Ok(resp)
 }
 
@@ -315,8 +314,8 @@ fn handle_link(url: &str) -> Result<()> {
     let target_endpoint = format!("{}/submit", proxy_base.trim_end_matches('/'));
 
     let resp = ureq::post(&target_endpoint)
-        .set("Content-Type", "application/x-www-form-urlencoded")
-        .send_form(&[("callback_url", url)])?;
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .send_form([("callback_url", url)])?;
 
     if resp.status() != 200 {
         anyhow::bail!("Server Error: {}", resp.status());
