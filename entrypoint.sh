@@ -45,10 +45,20 @@ log() {
     fi
 }
 
+# --- VERBOSITY MAPPING ---
+# Map Container LOG_LEVEL to gpclient verbose flags
+GP_VERBOSITY=""
+if [ "$LOG_LEVEL" == "DEBUG" ]; then
+    GP_VERBOSITY="-v"
+elif [ "$LOG_LEVEL" == "TRACE" ]; then
+    GP_VERBOSITY="-vv"
+fi
+
 # --- GRACEFUL SHUTDOWN ---
 cleanup() {
     log "WARN" "Received Shutdown Signal"
     sudo pkill gpclient || true
+    sudo pkill gpservice || true
     kill "$(jobs -p)" 2>/dev/null || true
     exit 0
 }
@@ -71,22 +81,28 @@ check_log_size() {
 
 # --- WATCHDOG ---
 check_services() {
-    # 1. Web UI Check
+    # 1. Web UI Check (Always required)
     if ! pgrep -f server.py >/dev/null; then
         log "ERROR" "CRITICAL: Web UI (server.py) died."
         exit 1
     fi
 
-    # 2. GlobalProtect Service Check
-    if ! pgrep -f "gpservice" >/dev/null; then
-        log "ERROR" "CRITICAL: gpservice died."
+    # 2. GlobalProtect Service Check (Only if Active)
+    # We only check gpservice if we expect it to be running (Active mode)
+    local mode
+    mode=$(cat "$MODE_FILE" 2>/dev/null || echo "idle")
 
-        # DEBUG: Dump process list to see what IS running
-        log "ERROR" "--- PROCESS LIST (DEBUG) ---"
-        ps aux >&2
+    if [ "$mode" == "active" ]; then
+        if ! pgrep -f "gpservice" >/dev/null; then
+            log "ERROR" "CRITICAL: gpservice died while VPN was active."
 
-        log "ERROR" "--- DUMPING LOGS (Last 50 lines) ---"
-        tail -n 50 "$SERVICE_LOG" >&2
+            # DEBUG: Dump process list to see what IS running
+            log "ERROR" "--- PROCESS LIST (DEBUG) ---"
+            ps aux >&2
+
+            log "ERROR" "--- DUMPING LOGS (Last 50 lines) ---"
+            tail -n 50 "$SERVICE_LOG" >&2
+        fi
     fi
 }
 
@@ -196,13 +212,6 @@ chmod 644 "$MODE_FILE"
 log "INFO" "Starting Services..."
 dns_watchdog &
 
-# FIX: Start gpservice via bash pipe to filter out benign error noise.
-runuser -u gpuser -- bash -c "
-    /usr/bin/gpservice 2>&1 | \
-    grep --line-buffered -v -E 'Failed to start WS server|Error: No such file or directory \(os error 2\)' \
-    >> \"$SERVICE_LOG\"
-" &
-
 if [ "$VPN_MODE" = "socks" ] || [ "$VPN_MODE" = "standard" ]; then
     runuser -u gpuser -- microsocks -i 0.0.0.0 -p 1080 >/dev/null 2>&1 &
 fi
@@ -223,9 +232,22 @@ while true; do
     check_log_size
 
     if read -r -t 2 _ <"$PIPE_CONTROL"; then
-        log "INFO" "Signal received. Starting gpclient..."
+        log "INFO" "Signal received. Starting Connection Sequence..."
         echo "active" >"$MODE_FILE"
 
+        # 1. Start gpservice (On-Demand)
+        # We start it here so it's fresh for the connection attempt
+        log "INFO" "Starting gpservice..."
+        runuser -u gpuser -- bash -c "
+            /usr/bin/gpservice 2>&1 | \
+            grep --line-buffered -v -E 'Failed to start WS server|Error: No such file or directory \(os error 2\)' \
+            >> \"$SERVICE_LOG\"
+        " &
+
+        # Give gpservice a moment to initialize the socket
+        sleep 2
+
+        # 2. Start gpclient (With Verbosity)
         runuser -u gpuser -- bash -c "
             export VPN_PORTAL=\"$VPN_PORTAL\"
             export GP_ARGS=\"$GP_ARGS\"
@@ -233,13 +255,19 @@ while true; do
             exec 3<> \"$PIPE_STDIN\"
 
             # Using sudo for gpclient to allow full network access
-            CMD=\"sudo gpclient --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
+            # Added GP_VERBOSITY based on LOG_LEVEL
+            CMD=\"sudo gpclient $GP_VERBOSITY --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
 
             echo \"[Entrypoint] Executing: \$CMD\" >> \"$SERVICE_LOG\"
             script -q -c \"\$CMD\" /dev/null <&3 >> \"$CLIENT_LOG\" 2>&1
         "
 
-        log "WARN" "gpclient exited."
+        # 3. Cleanup after disconnect
+        log "WARN" "gpclient exited. Cleaning up services..."
         echo "idle" >"$MODE_FILE"
+
+        # Kill gpservice to return to 'Standby' state
+        sudo pkill gpservice || true
+        log "INFO" "gpservice stopped. System Idle."
     fi
 done

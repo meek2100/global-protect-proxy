@@ -168,8 +168,6 @@ def analyze_log_lines(clean_lines: list[str], full_log_content: str) -> LogAnaly
         return res
 
     # 3. Check Input
-    # We don't return immediately here because we still need to check for SSO URLs
-    # even if we are in an input state (rare, but possible to overlap in logs)
     analysis_acc: LogAnalysis = {
         "state": "idle",
         "prompt": "",
@@ -184,13 +182,10 @@ def analyze_log_lines(clean_lines: list[str], full_log_content: str) -> LogAnaly
         analysis_acc = input_res
 
     # 4. Check SSO / Authentication
-    # This logic runs if we are IDLE or INPUT (to extract URLs)
     if "Manual Authentication Required" in full_log_content or "auth server started" in full_log_content:
-        # Only switch state to 'auth' if we aren't already waiting for user input
         if analysis_acc["state"] != "input":
             analysis_acc["state"] = "auth"
 
-        # Extract URL
         url_pattern = re.compile(r'(https?://[^\s"<>]+)')
         found_urls = url_pattern.findall(full_log_content)
         if found_urls:
@@ -216,7 +211,6 @@ def get_vpn_state() -> VPNState:
         try:
             content = MODE_FILE.read_text().strip()
             if content == "active":
-                # Active mode implies we should look at logs; default state logic applies
                 pass
             elif content == "idle":
                 return {
@@ -336,9 +330,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         """Handle POST requests for connection control."""
         if self.path == "/connect":
             logger.info("User requested Connection")
+            # Force clean slate: kill both client and service
             subprocess.run(["sudo", "pkill", "gpclient"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "pkill", "gpservice"], stderr=subprocess.DEVNULL)
             time.sleep(0.5)
             try:
+                # Platform-safe dynamic check for Windows dev
+                if sys.platform != "win32":
+                    if not FIFO_CONTROL.exists():
+                        os.mkfifo(FIFO_CONTROL)
+                        os.chmod(FIFO_CONTROL, 0o666)
+
                 with open(FIFO_CONTROL, "w") as f:
                     f.write("START\n")
                 self.send_response(200)
@@ -350,7 +352,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         if self.path == "/disconnect":
             logger.info("User requested Disconnect")
+            # Kill everything to return to standby
             subprocess.run(["sudo", "pkill", "gpclient"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "pkill", "gpservice"], stderr=subprocess.DEVNULL)
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"OK")
@@ -382,7 +386,6 @@ if __name__ == "__main__":
     os.chdir("/var/www/html")
 
     # FIX: Platform-safe check for Windows development environments
-    # We use getattr to avoid 'attr-defined' errors on Windows and 'unused-ignore' errors on Linux
     if sys.platform != "win32":
         if not FIFO_CONTROL.exists():
             os.mkfifo(FIFO_CONTROL)
