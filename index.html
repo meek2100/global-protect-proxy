@@ -4,9 +4,9 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-        <title>GlobalProtect Proxy</title>
+        <title>GP Proxy Client</title>
         <style>
-            /* --- DESIGN SYSTEM (Restored from working-gui) --- */
+            /* --- DESIGN SYSTEM (Restored) --- */
             :root {
                 /* Light Theme */
                 --bg-body: #f8fafc;
@@ -62,6 +62,8 @@
                 padding: 16px;
                 box-sizing: border-box;
                 display: flex;
+                flex-direction: column;
+                align-items: center;
                 justify-content: center;
             }
 
@@ -72,14 +74,13 @@
                 box-shadow: var(--shadow-lg);
                 width: 100%;
                 max-width: 480px;
-                /* Compromise width */
                 padding: 40px 32px;
                 position: relative;
                 text-align: center;
                 transition: all 0.3s ease;
             }
 
-            /* Large Screens (Restored) */
+            /* Large Screens */
             @media (min-width: 2500px) {
                 .card {
                     max-width: 600px;
@@ -92,7 +93,7 @@
                 }
             }
 
-            /* Mobile (Restored) */
+            /* Mobile */
             @media (max-width: 480px) {
                 .app-container {
                     padding: 0;
@@ -112,7 +113,7 @@
                 }
             }
 
-            /* --- HEADER LAYOUT (IMPROVED) --- */
+            /* --- HEADER LAYOUT --- */
             .card-header {
                 display: flex;
                 justify-content: space-between;
@@ -290,7 +291,7 @@
                 border-color: var(--accent-blue);
             }
 
-            /* Info Box (New Feature Integrated) */
+            /* Info Box */
             .info-box {
                 background: var(--bg-body);
                 border: 1px solid var(--border-color);
@@ -336,7 +337,7 @@
                 }
             }
 
-            /* Debug Console (Restored) */
+            /* Debug Console */
             #debug-section {
                 margin-top: 32px;
                 padding-top: 16px;
@@ -368,6 +369,16 @@
                 max-height: 200px;
                 margin-top: 12px;
             }
+
+            /* Disclaimer Footer */
+            .legal-footer {
+                margin-top: 24px;
+                font-size: 0.7rem;
+                color: var(--text-secondary);
+                max-width: 480px;
+                text-align: center;
+                line-height: 1.4;
+            }
         </style>
     </head>
 
@@ -376,8 +387,8 @@
             <div class="card">
                 <div class="card-header">
                     <div class="header-text">
-                        <h1>GlobalProtect</h1>
-                        <p class="subtitle">Secure Proxy Gateway</p>
+                        <h1>GP Proxy Client</h1>
+                        <p class="subtitle">Unofficial OpenConnect Gateway</p>
                     </div>
                     <div class="control-group">
                         <button class="icon-btn" id="theme-toggle" title="Toggle Theme" onclick="toggleTheme()">
@@ -519,10 +530,16 @@
                 </div>
                 <div id="debug-log" class="hidden"></div>
             </div>
+
+            <div class="legal-footer">
+                GP Proxy Client is an unofficial open-source tool.<br />
+                It is not affiliated with, endorsed by, or authorized by Palo Alto Networks.<br />
+                "GlobalProtect" is a trademark of Palo Alto Networks.
+            </div>
         </div>
 
         <script>
-            // --- THEME LOGIC (Restored) ---
+            // --- THEME LOGIC ---
             function initTheme() {
                 const stored = localStorage.getItem("theme");
                 if (stored) document.documentElement.setAttribute("data-theme", stored);
@@ -538,6 +555,7 @@
 
             // --- APP LOGIC ---
             window.vpnState = null;
+            let pollInterval = null;
 
             function setView(viewId) {
                 ["idle", "connecting", "auth", "input", "connected", "error"].forEach((id) => {
@@ -557,19 +575,21 @@
                 setBadge("Starting...", "connecting");
                 setView("connecting");
                 await fetch("/connect", { method: "POST" });
+                resetPoll(1000); // Speed up polling
             }
 
             async function triggerDisconnect() {
                 if (confirm("Disconnect VPN session?")) {
                     setBadge("Disconnecting...", "idle");
                     await fetch("/disconnect", { method: "POST" });
+                    resetPoll(1000);
                 }
             }
 
             async function confirmReset() {
                 if (confirm("Force reset process? This will kill the VPN.")) {
                     setBadge("Resetting...", "idle");
-                    await fetch("/disconnect", { method: "POST" }); // Logic handles kill
+                    await fetch("/disconnect", { method: "POST" });
                     window.vpnState = null;
                 }
             }
@@ -580,6 +600,7 @@
                 await fetch("/submit", { method: "POST", body: formData });
                 setView("connecting");
                 event.target.reset();
+                resetPoll(1000);
             }
 
             async function updateStatus() {
@@ -587,13 +608,13 @@
                     const res = await fetch("/status.json?t=" + Date.now());
                     const data = await res.json();
 
-                    // 1. DUAL INFO LOGIC (New Feature)
+                    // 1. INFO LOGIC
                     const showGateway = data.vpn_mode === "gateway" || data.vpn_mode === "standard";
                     const showSocks = data.vpn_mode === "socks" || data.vpn_mode === "standard";
                     document.getElementById("info-gateway").classList.toggle("hidden", !showGateway);
                     document.getElementById("info-socks").classList.toggle("hidden", !showSocks);
 
-                    // 2. DEBUG VISIBILITY (Restored)
+                    // 2. DEBUG VISIBILITY
                     const debugSec = document.getElementById("debug-section");
                     if (data.debug_mode) {
                         debugSec.classList.remove("hidden");
@@ -621,11 +642,22 @@
                             container.innerHTML = `<input type="${data.input_type === "password" ? "password" : "text"}" name="user_input" required>`;
                         }
                     }
-                } catch (e) {}
+
+                    // OPTIMIZATION: Adaptive Polling
+                    const fastStates = ["connecting", "auth", "input"];
+                    const newDelay = fastStates.includes(data.state) ? 1000 : 5000;
+                    resetPoll(newDelay);
+                } catch (e) {
+                    resetPoll(5000);
+                }
+            }
+
+            function resetPoll(delay) {
+                if (pollInterval) clearTimeout(pollInterval);
+                pollInterval = setTimeout(updateStatus, delay);
             }
 
             initTheme();
-            setInterval(updateStatus, 1500);
             updateStatus();
         </script>
     </body>

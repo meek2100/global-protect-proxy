@@ -147,7 +147,7 @@ fi
 
 # --- STARTUP SUMMARY ---
 log "INFO" "=========================================="
-log "INFO" "       GlobalProtect Proxy Startup        "
+log "INFO" "          GP Proxy Startup               "
 log "INFO" "=========================================="
 log "INFO" "Mode:        $VPN_MODE"
 log "INFO" "Log Level:   $LOG_LEVEL"

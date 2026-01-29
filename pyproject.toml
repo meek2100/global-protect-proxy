@@ -1,11 +1,11 @@
 # File: pyproject.toml
 [project]
-name = "global-protect-proxy"
+name = "gp-proxy"
 version = "0.1.0"
-description = "GlobalProtect VPN client in a Docker container with Web UI"
+description = "Unofficial OpenConnect wrapper for GlobalProtect VPNs"
 readme = "agents.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = []                                                     # No runtime dependencies (server.py uses standard lib)
 
 [project.optional-dependencies]
 dev = [
@@ -49,4 +49,3 @@ pythonVersion = "3.14"
 
 [tool.codespell]
 skip = "*.min.js,*.min.css,*.lock,package-lock.json"
-# ignore-words-list = "word1,word2"

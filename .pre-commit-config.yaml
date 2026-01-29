@@ -102,3 +102,31 @@ repos:
     hooks:
       - id: pyright
         files: '\.py$'
+  # --- RUST (System Hooks) ---
+  # Requires 'cargo' to be in your $PATH
+  - repo: local
+    hooks:
+      - id: rustfmt
+        name: rustfmt
+        description: Formats Rust code using rustfmt
+        entry: cargo fmt --all -- --check
+        language: system
+        types: [rust]
+        pass_filenames: false # cargo fmt handles the workspace
+
+      - id: cargo-check
+        name: cargo check
+        description: fast check to ensure code compiles
+        entry: cargo check --all-targets --all-features
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: clippy
+        name: cargo clippy
+        description: Lint Rust code (equivalent to ruff for python)
+        # -D warnings forces it to fail on any warning (Strict Mode)
+        entry: cargo clippy --all-targets --all-features -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false

@@ -1,0 +1,11 @@
+# File: apps/gp-helper/Cargo.toml
+[dependencies]
+ureq = "2.9"        # Tiny, blocking HTTP client (minimal dependencies)
+anyhow = "1.0"      # Error handling
+directories = "5.0" # Cross-platform path handling
+env_logger = "0.10"
+log = "0.4"
+
+# Windows-only dependency for Registry editing
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.52"

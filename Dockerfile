@@ -36,6 +36,10 @@ ENV CARGO_PROFILE_RELEASE_LTO=thin \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
     CARGO_PROFILE_RELEASE_PANIC=abort
 
+# Create a tiny healthcheck binary
+RUN echo 'fn main() { if std::net::TcpStream::connect("127.0.0.1:8001").is_ok() { std::process::exit(0); } else { std::process::exit(1); } }' > healthcheck.rs && \
+    rustc -O healthcheck.rs -o healthcheck
+
 # Build all binaries and strip in one layer
 RUN cargo build --release --bin gpclient --no-default-features && \
     cargo build --release --bin gpservice && \
@@ -47,6 +51,8 @@ RUN cargo build --release --bin gpclient --no-default-features && \
 FROM python:3.14-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
+# OPTIMIZATION: Prevent Python from writing .pyc files to disk
+ENV PYTHONDONTWRITEBYTECODE=1
 
 # MINIMAL RUNTIME DEPENDENCIES
 # - python3: Already provided by base image
@@ -76,26 +82,32 @@ COPY --from=builder \
     /usr/src/app/target/release/gpauth \
     /usr/bin/
 
+# Copy the binary
+COPY --from=builder /usr/src/app/healthcheck /usr/bin/healthcheck
+
 # Set capabilities and refresh library cache
 # 'ldconfig' is crucial here so gpservice finds libs without LD_LIBRARY_PATH
+# OPTIMIZATION: Install libcap, apply caps, then UNINSTALL it in one layer
 RUN apt-get update && apt-get install -y --no-install-recommends libcap2-bin && \
     setcap 'cap_net_admin,cap_net_bind_service+ep' /usr/bin/gpservice && \
+    apt-get remove -y libcap2-bin && \
+    apt-get autoremove -y && \
     ldconfig && \
     rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /var/www/html /tmp/gp-logs /run/dbus && \
     chown -R gpuser:gpuser /var/www/html /tmp/gp-logs /run/dbus
 
-COPY server.py /var/www/html/server.py
-COPY index.html /var/www/html/index.html
+# OPTIMIZATION: Combine App file copies
+COPY server.py index.html /var/www/html/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
 
-# Healthcheck
+# Update Healthcheck instruction
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8001/status.json').getcode())" || exit 1
+    CMD /usr/bin/healthcheck || exit 1
 
 EXPOSE 1080 8001
 ENTRYPOINT ["/entrypoint.sh"]
