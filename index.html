@@ -386,6 +386,70 @@
         <div class="app-container">
             <div class="card">
                 <div class="card-header">
+                    <div style="margin-right: 24px; flex-shrink: 0">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="80" height="80">
+                            <defs>
+                                <linearGradient
+                                    id="shieldGrad"
+                                    x1="128"
+                                    y1="40"
+                                    x2="128"
+                                    y2="200"
+                                    gradientUnits="userSpaceOnUse"
+                                >
+                                    <stop offset="0" stop-color="#3b82f6" />
+                                    <stop offset="1" stop-color="#10b981" />
+                                </linearGradient>
+                            </defs>
+                            <circle cx="128" cy="128" r="128" fill="var(--bg-card, #ffffff)" />
+
+                            <g stroke="var(--border-color, #e2e8f0)" stroke-width="2" fill="none" opacity="0.6">
+                                <path d="M20 128 H 50 L 75 100 V 60" />
+                                <circle cx="20" cy="128" r="4" fill="var(--border-color, #e2e8f0)" />
+                                <path d="M236 128 H 206 L 181 156 V 196" />
+                                <circle cx="236" cy="128" r="4" fill="var(--border-color, #e2e8f0)" />
+                                <path d="M128 20 V 40" />
+                                <circle cx="128" cy="20" r="4" fill="var(--border-color, #e2e8f0)" />
+                            </g>
+
+                            <path
+                                d="M128 48 C 128 48, 200 64, 200 100 C 200 156, 128 200, 128 200 C 128 200, 56 156, 56 100 C 56 64, 128 48, 128 48 Z"
+                                fill="url(#shieldGrad)"
+                            />
+                            <text
+                                x="128"
+                                y="125"
+                                text-anchor="middle"
+                                font-family="Inter, sans-serif"
+                                font-weight="800"
+                                font-size="60"
+                                fill="#ffffff"
+                                style="letter-spacing: -2px"
+                            >
+                                GP
+                            </text>
+                            <path
+                                d="M118 150 H 138 V 165 H 118 V 150 Z M 120 150 V 142 C 120 137.58 123.58 134 128 134 C 132.42 134 136 137.58 136 142 V 150"
+                                fill="#ffffff"
+                                stroke="#ffffff"
+                                stroke-width="2"
+                            />
+                            <path d="M128 154 V 160" stroke="#3b82f6" stroke-width="3" stroke-linecap="round" />
+
+                            <text
+                                x="128"
+                                y="235"
+                                text-anchor="middle"
+                                font-family="Inter, sans-serif"
+                                font-weight="700"
+                                font-size="24"
+                                fill="var(--text-primary, #0f172a)"
+                                style="letter-spacing: 1px"
+                            >
+                                PROXY
+                            </text>
+                        </svg>
+                    </div>
                     <div class="header-text">
                         <h1>GP Proxy Client</h1>
                         <p class="subtitle">Unofficial OpenConnect Gateway</p>
