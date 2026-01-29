@@ -16,10 +16,10 @@ use std::process::Command;
 
 // --- EMBEDDED ASSETS ---
 #[cfg(target_os = "linux")]
-const ICON_PNG: &[u8] = include_bytes!("../../assets/icon.png");
+const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
 #[cfg(target_os = "macos")]
-const ICON_ICNS: &[u8] = include_bytes!("../../assets/AppIcon.icns");
+const ICON_ICNS: &[u8] = include_bytes!("../assets/AppIcon.icns");
 
 // Constants
 const UDP_PORT: u16 = 32800;
