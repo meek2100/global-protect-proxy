@@ -54,6 +54,16 @@ elif [ "$LOG_LEVEL" == "TRACE" ]; then
     GP_VERBOSITY="-vv"
 fi
 
+# --- STARTUP SUMMARY (Requested Improvement) ---
+log "INFO" "=========================================="
+log "INFO" "       GlobalProtect Proxy Startup        "
+log "INFO" "=========================================="
+log "INFO" "Mode:        $VPN_MODE"
+log "INFO" "Log Level:   $LOG_LEVEL"
+log "INFO" "Verbosity:   ${GP_VERBOSITY:-None}"
+log "INFO" "Portal:      ${VPN_PORTAL:-[Not Set]}"
+log "INFO" "------------------------------------------"
+
 # --- GRACEFUL SHUTDOWN ---
 cleanup() {
     log "WARN" "Received Shutdown Signal"
@@ -248,6 +258,7 @@ while true; do
         sleep 2
 
         # 2. Start gpclient (With Verbosity)
+        # Explicitly pass GP_VERBOSITY (e.g. -v or -vv)
         runuser -u gpuser -- bash -c "
             export VPN_PORTAL=\"$VPN_PORTAL\"
             export GP_ARGS=\"$GP_ARGS\"
@@ -255,7 +266,6 @@ while true; do
             exec 3<> \"$PIPE_STDIN\"
 
             # Using sudo for gpclient to allow full network access
-            # Added GP_VERBOSITY based on LOG_LEVEL
             CMD=\"sudo gpclient $GP_VERBOSITY --fix-openssl connect \\\"\$VPN_PORTAL\\\" --browser remote \$GP_ARGS\"
 
             echo \"[Entrypoint] Executing: \$CMD\" >> \"$SERVICE_LOG\"
