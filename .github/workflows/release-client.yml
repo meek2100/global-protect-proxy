@@ -1,0 +1,64 @@
+# File: .github/workflows/release-client.yml
+name: Release Client Binaries
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write # Required to upload assets to the Release
+
+jobs:
+  build-client:
+    name: Build ${{ matrix.os-name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            os-name: Linux
+            target: x86_64-unknown-linux-gnu
+            binary-name: vpn-link-handler
+            asset-name: vpn-link-handler-linux-amd64
+
+          - os: windows-latest
+            os-name: Windows
+            target: x86_64-pc-windows-msvc
+            binary-name: vpn-link-handler.exe
+            asset-name: vpn-link-handler-windows-amd64.exe
+
+          - os: macos-latest
+            os-name: macOS
+            target: x86_64-apple-darwin
+            binary-name: vpn-link-handler
+            asset-name: vpn-link-handler-macos-amd64
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Build Binary
+        # We cd into the app directory to ensure Cargo finds the file context correctly
+        run: |
+          cd apps/vpn-link-handler
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare Asset
+        shell: bash
+        run: |
+          # Rename the binary to be descriptive (e.g., vpn-link-handler-windows.exe)
+          cd apps/vpn-link-handler/target/${{ matrix.target }}/release
+          mv ${{ matrix.binary-name }} ../../../../${{ matrix.asset-name }}
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: apps/vpn-link-handler/${{ matrix.asset-name }}
