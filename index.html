@@ -272,6 +272,17 @@
                 border-color: var(--accent-red);
             }
 
+            /* Disabled State */
+            .btn-disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+                pointer-events: none;
+                background-color: var(--bg-body);
+                border-color: var(--border-color);
+                color: var(--text-secondary);
+                box-shadow: none;
+            }
+
             input,
             select {
                 width: 100%;
@@ -289,6 +300,43 @@
 
             input:focus,
             select:focus {
+                border-color: var(--accent-blue);
+            }
+
+            /* Auth Actions Container */
+            .auth-actions {
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                width: 100%;
+                margin-bottom: 16px;
+            }
+
+            .auth-actions .btn {
+                margin: 0;
+                /* Reset margins for flex children */
+            }
+
+            .restart-btn {
+                background: transparent;
+                border: 1px solid var(--border-color);
+                color: var(--text-secondary);
+                width: 48px;
+                height: 48px;
+                /* Match height of standard buttons */
+                padding: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: var(--radius-md);
+                cursor: pointer;
+                transition: all 0.2s;
+                flex-shrink: 0;
+            }
+
+            .restart-btn:hover {
+                background-color: var(--bg-body);
+                color: var(--accent-blue);
                 border-color: var(--accent-blue);
             }
 
@@ -454,17 +502,39 @@
 
                 <div id="view-auth" class="hidden">
                     <h3 style="font-size: 1.1rem; margin-bottom: 16px">Authentication Required</h3>
-                    <a
-                        id="sso-link"
-                        href="#"
-                        target="_blank"
-                        class="btn btn-secondary"
-                        onclick="
-                            this.classList.add('btn-disabled');
-                            this.innerText = 'Link Opened';
-                        "
-                        >Open SSO Login</a
-                    >
+
+                    <div class="auth-actions">
+                        <a
+                            id="sso-link"
+                            href="#"
+                            target="_blank"
+                            class="btn btn-secondary"
+                            style="flex-grow: 1"
+                            onclick="handleSSOClick(this)"
+                        >
+                            Open SSO Login
+                        </a>
+                        <button
+                            id="btn-restart-auth"
+                            class="restart-btn hidden"
+                            title="Generate New Link"
+                            onclick="restartAuth()"
+                        >
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                width="20"
+                                height="20"
+                            >
+                                <path d="M23 4v6h-6"></path>
+                                <path d="M1 20v-6h6"></path>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                            </svg>
+                        </button>
+                    </div>
+
                     <form onsubmit="handleFormSubmit(event)">
                         <input
                             type="text"
@@ -592,6 +662,7 @@
             // --- APP LOGIC ---
             window.vpnState = null;
             let pollInterval = null;
+            let lastAuthUrl = ""; // Track URL to detect fresh sessions
 
             function setView(viewId) {
                 ["idle", "connecting", "auth", "input", "connected", "error"].forEach((id) => {
@@ -605,6 +676,42 @@
                 const txt = document.getElementById("badge-text");
                 badge.className = `badge ${type}`;
                 txt.innerText = text;
+            }
+
+            // --- NEW: Single Click SSO Logic ---
+            function handleSSOClick(btn) {
+                // Visual feedback: link is now "dead"
+                btn.classList.add("btn-disabled");
+                btn.innerText = "Link Opened";
+                btn.removeAttribute("href"); // Remove link to prevent re-click
+
+                // Show the inline restart button
+                document.getElementById("btn-restart-auth").classList.remove("hidden");
+            }
+
+            // --- NEW: Restart Auth Logic ---
+            async function restartAuth() {
+                // Trigger a full reset/connect cycle
+                setBadge("Generating Link...", "connecting");
+                // We keep the view on 'auth' (or let it flicker to connecting naturally)
+                // but visually we want to show we are doing something.
+                // Disabling the restart button so they don't spam it
+                const restartBtn = document.getElementById("btn-restart-auth");
+                restartBtn.classList.add("hidden");
+
+                await fetch("/connect", { method: "POST" });
+                resetPoll(1000); // Poll fast for the new link
+            }
+
+            // Helper to reset the SSO button state (used when new link arrives)
+            function resetSSOButtonState(newUrl) {
+                const btn = document.getElementById("sso-link");
+                btn.classList.remove("btn-disabled");
+                btn.innerText = "Open SSO Login";
+                btn.href = newUrl;
+
+                // Hide restart button (until clicked again)
+                document.getElementById("btn-restart-auth").classList.add("hidden");
             }
 
             async function triggerConnect() {
@@ -669,7 +776,19 @@
                     }
 
                     // 4. DATA BINDING
-                    if (data.url) document.getElementById("sso-link").href = data.url;
+                    if (data.url) {
+                        // NEW: Check if this is a fresh URL to reset the button
+                        if (data.url !== lastAuthUrl) {
+                            lastAuthUrl = data.url;
+                            resetSSOButtonState(data.url);
+                        }
+                        // Update href if button is not disabled (sanity check)
+                        const btn = document.getElementById("sso-link");
+                        if (!btn.classList.contains("btn-disabled")) {
+                            btn.href = data.url;
+                        }
+                    }
+
                     if (data.error) document.getElementById("error-message").innerText = data.error;
                     if (data.state === "input") {
                         document.getElementById("input-prompt").innerText = data.prompt;
